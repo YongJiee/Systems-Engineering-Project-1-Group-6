@@ -9,7 +9,7 @@ This repository documents my Systems Engineering project at university, using th
 This repository contains ROS packages for limo. 
 >>>>>>> refactor code
 
-<img src="limo_description/img/limo.jpg" width="640" height="208" /> 
+<img src="limo_bringup/img/limo.jpg" width="640" height="208" /> 
 
 ## Packages
  
