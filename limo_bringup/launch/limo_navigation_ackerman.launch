@@ -8,19 +8,23 @@
     </node>
 
 	<node pkg="amcl" type="amcl" name="amcl" output="screen">
-        <rosparam file="$(find limo_bringup)/param/amcl_params_diff.yaml" command="load" />
+        <rosparam file="$(find limo_bringup)/param/amcl_params.yaml" command="load" />
 	    <param name="initial_pose_x"            value="0"/>
 		<param name="initial_pose_y"            value="0"/>
 		<param name="initial_pose_a"            value="0"/>
 	</node>
 
+    <node pkg="map_server" type="map_server" name="map_server" args="$(find limo_bringup)/maps/carto.yaml" output="screen" >
+    <param name="frame_id" value="map"/>
+    </node>
+
     <!--  ************** Navigation ***************  -->
 	<node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
-  	  	<rosparam file="$(find limo_bringup)/param/ackerman/costmap_common_params.yaml" command="load" ns="global_costmap" />
-  	 	<rosparam file="$(find limo_bringup)/param/ackerman/costmap_common_params.yaml" command="load" ns="local_costmap" />
-  		<rosparam file="$(find limo_bringup)/param/ackerman/local_costmap_params.yaml" command="load" />
-  		<rosparam file="$(find limo_bringup)/param/ackerman/global_costmap_params.yaml" command="load" />
-  		<rosparam file="$(find limo_bringup)/param/ackerman/teb_local_planner_params.yaml" command="load" />
+  	  	<rosparam file="$(find limo_bringup)/param/carlike2/costmap_common_params.yaml" command="load" ns="global_costmap" />
+  	 	<rosparam file="$(find limo_bringup)/param/carlike2/costmap_common_params.yaml" command="load" ns="local_costmap" />
+  		<rosparam file="$(find limo_bringup)/param/carlike2/local_costmap_params.yaml" command="load" />
+  		<rosparam file="$(find limo_bringup)/param/carlike2/global_costmap_params.yaml" command="load" />
+  		<rosparam file="$(find limo_bringup)/param/carlike2/teb_local_planner_params.yaml" command="load" />
 
 		<param name="base_global_planner" value="global_planner/GlobalPlanner" />
 		<param name="planner_frequency" value="1.0" />

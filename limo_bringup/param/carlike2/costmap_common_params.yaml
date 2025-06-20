@@ -1,21 +1,19 @@
 
 #---standard pioneer footprint---
 #---(in meters)---
+#footprint: [ [0.254, -0.0508], [0.1778, -0.0508], [0.1778, -0.1778], [-0.1905, -0.1778], [-0.254, 0], [-0.1905, 0.1778], [0.1778, 0.1778], [0.1778, 0.0508], [0.254, 0.0508] ]
+footprint: [ [-0.08,-0.1], [0.22,-0.1], [0.22,0.1], [-0.08,0.1] ]
 
-footprint: [[-0.16, -0.11], [-0.16, 0.11], [0.16, 0.11], [0.16, -0.11]]
-footprint_padding: 0.12  #0.02 deafult
 
 transform_tolerance: 0.2
 map_type: costmap
 
-always_send_full_costmap: true
-
 obstacle_layer:
  enabled: true
- obstacle_range: 3.0
- raytrace_range: 4.0
- inflation_radius: 0.2
- track_unknown_space: true
+ obstacle_range: 1.0
+ raytrace_range: 3.5
+ inflation_radius: 0.1
+ track_unknown_space: false
  combination_method: 1
 
  observation_sources: laser_scan_sensor
