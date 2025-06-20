@@ -6,7 +6,7 @@
     <arg name="odom_frame" default="odom" />
     <arg name="base_frame" default="base_link" />
     <arg name="use_mcnamu" default="false" />
-    <arg name="pub_odom_tf" default="false" />
+    <arg name="pub_odom_tf" default="" />
 
     <node name="limo_base_node" pkg="limo_base" type="limo_base_node" output="screen" >
         <param name="port_name" value="$(arg port_name)" />
