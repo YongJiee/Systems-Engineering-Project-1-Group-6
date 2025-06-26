@@ -17,7 +17,7 @@
 	</node>      
 
     <!--  ************** map server ***************  -->
-    <node pkg="map_server" type="map_server" name="map_server" args="$(find limo_bringup)/maps/map06.yaml" output="screen" >
+    <node pkg="map_server" type="map_server" name="map_server" args="$(find limo_bringup)/maps/map1.yaml" output="screen" >
     <param name="frame_id" value="map"/>
     </node>
     <!--  ************** Navigation *************** -->
