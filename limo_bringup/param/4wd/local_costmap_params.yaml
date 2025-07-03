@@ -5,11 +5,11 @@ local_costmap:
   publish_frequency: 2 #before 2.0
   static_map: false
   rolling_window: true
-  width: 0.5 
-  height: 0.5
-  resolution: 0.05 #increase to for higher res 0.025 #0.05
+  width: 0.8 #defult 0.5
+  height: 0.8 #default 0.5
+  resolution: 0.025 #increase to for higher res 0.025 # default 0.05
   transform_tolerance: 0.3 #0.5
-  cost_scaling_factor: 2.0 #2.58
+  cost_scaling_factor: 1.0 #2.58, 2.0
 inflation_radius: 0.05  #0.1
 
 plugins:

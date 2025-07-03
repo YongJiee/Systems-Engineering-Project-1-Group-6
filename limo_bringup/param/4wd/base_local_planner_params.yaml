@@ -19,13 +19,13 @@ DWAPlannerROS:
   trans_stopped_vel: 0.1
   rot_stopped_vel: 0.1
   sim_time: 2.0
-  sim_granularity: 0.1
-  angular_sim_granularity: 0.1
+  sim_granularity: 0.025 # Default, 0.1
+  angular_sim_granularity: 0.025  # Default, 0.1
   pdist_scale: 0.6
   gdist_scale: 0.8
   path_distance_bias: 34.0
   goal_distance_bias: 24.0
-  occdist_scale: 0.01
+  occdist_scale: 1.0  # Default, 0.01
   twirling_scale: 0.0
   stop_time_buffer: 0.5
   oscillation_reset_dist: 0.05

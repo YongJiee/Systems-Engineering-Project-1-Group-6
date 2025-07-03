@@ -17,13 +17,13 @@ class SmartNavigator:
         rospy.init_node('smart_navigation_node')
 
         self.plot_centers = [
-            (0.0, 0.5, 0.0),                # 0 - Home
+            (0.0, 0.0, 0.0),                # 0 - Home
             (1.0, 1.0, 0.0),                # 1
             (2.0, 1.0, math.pi / 2),        # 2
             (3.0, 1.0, math.pi),            # 3
             (1.0, 2.0, -math.pi / 2),       # 4
             (3.0, 2.0, 0.0),                # 5
-            (1.5, 0.0, math.pi / 4),        # 6
+            (1.2, 0.15, math.pi / 2),        # 6
             (2.0, 3.0, -math.pi / 4),       # 7
             (3.0, 3.0, math.pi)             # 8
         ]
