@@ -17,13 +17,13 @@ class SmartNavigator:
         rospy.init_node('smart_navigation_node')
 
         self.plot_centers = [
-            (0.0, 0.0, 0.0),                # 0 - Home
+            (0.0, 0.5, 0.0),                # 0 - Home
             (1.0, 1.0, 0.0),                # 1
             (2.0, 1.0, math.pi / 2),        # 2
             (3.0, 1.0, math.pi),            # 3
             (1.0, 2.0, -math.pi / 2),       # 4
             (3.0, 2.0, 0.0),                # 5
-            (1.0, 3.0, math.pi / 4),        # 6
+            (1.5, 0.0, math.pi / 4),        # 6
             (2.0, 3.0, -math.pi / 4),       # 7
             (3.0, 3.0, math.pi)             # 8
         ]
@@ -80,12 +80,27 @@ class SmartNavigator:
         if not self.scan_data:
             rospy.logwarn("No LIDAR data available.")
             return False
-        valid_ranges = [r for i, r in enumerate(self.scan_data) if i % 10 == 0]
-        return all(r > 0.6 or r == float('inf') for r in valid_ranges)
+
+        # Use forward hemisphere: 60° left to 60° right
+        num_points = len(self.scan_data)
+        angle_range_deg = 120  # total 120° FOV
+        step_deg = 5
+        center_index = num_points // 2
+        angle_span = int(angle_range_deg / step_deg / 2)
+
+        valid_indices = range(center_index - angle_span, center_index + angle_span)
+        valid_ranges = [self.scan_data[i] for i in valid_indices if 0 <= i < num_points]
+
+        for r in valid_ranges:
+            if 0 < r < 0.6:
+                return False
+
+        return True
 
     def recover_smart(self):
         rospy.loginfo("Smart recovery: clear costmap, rotate until plan found, or reverse if blocked.")
-        self.client.cancel_goal()
+        if self.client.get_state() not in [3, 4, 5, 9]:  # Avoid cancelling completed goals
+            self.client.cancel_goal()
 
         try:
             rospy.wait_for_service('/move_base/clear_costmaps', timeout=2.0)
@@ -102,21 +117,27 @@ class SmartNavigator:
             twist = Twist()
             twist.angular.z = 0.4
             rate = rospy.Rate(10)
-            while not rospy.is_shutdown() and not self.can_make_plan():
+            while not rospy.is_shutdown():
                 self.cmd_vel_pub.publish(twist)
+                if self.can_make_plan():
+                    break
                 rate.sleep()
             self.cmd_vel_pub.publish(Twist())
             rospy.loginfo("Valid plan detected. Stopping rotation.")
+            return  # Exit after successful rotation and plan
+
         else:
-            rospy.logwarn("Not enough space. Reversing... (attempt #%d)", self.recovery_attempts + 1)
+            rospy.logwarn("Not enough space. Reversing slightly... (attempt #%d)", self.recovery_attempts + 1)
             twist = Twist()
             twist.linear.x = -0.2
-            # reduce reversing distance gradually if repeating
             reverse_steps = max(3, 8 - self.recovery_attempts * 2)
             for _ in range(reverse_steps):
                 self.cmd_vel_pub.publish(twist)
                 rospy.sleep(0.1)
             self.cmd_vel_pub.publish(Twist())
+            self.recovery_attempts += 1
+            rospy.sleep(1.0)
+            return  # Exit after reversing to avoid repeating within one call
             self.recovery_attempts += 1
         rospy.sleep(1.0)
 
@@ -125,11 +146,15 @@ class SmartNavigator:
             twist = Twist()
             twist.angular.z = 0.4
             rate = rospy.Rate(10)
-            while not rospy.is_shutdown() and not self.can_make_plan():
+            while not rospy.is_shutdown():
                 self.cmd_vel_pub.publish(twist)
+                if self.can_make_plan():
+                    break
                 rate.sleep()
             self.cmd_vel_pub.publish(Twist())
             rospy.loginfo("Valid plan detected. Stopping rotation.")
+            return  # Exit after successful rotation and plan
+
         else:
             rospy.logwarn("Not enough space. Reversing...")
             twist = Twist()
@@ -164,11 +189,17 @@ class SmartNavigator:
         for i, goal in enumerate(self.goal_list):
             self.recovery_attempts = 0
             self.current_goal = goal
-            rospy.loginfo("Navigating to plot %d of %d", i + 1, len(self.goal_list))
+            rospy.loginfo("Navigating to plot %d", rospy.get_param("~options", [])[i])
 
+            start_time = rospy.Time.now()
             while not self.can_make_plan():
-                rospy.logwarn("No path found. Trying recovery...")
-                self.recover_smart()
+                if (rospy.Time.now() - start_time).to_sec() < 5.0:
+                    rospy.loginfo("Waiting for planner to succeed...")
+                    rospy.sleep(1.0)
+                else:
+                    rospy.logwarn("No path found after 5 seconds. Trying recovery...")
+                    self.recover_smart()
+                    start_time = rospy.Time.now()
 
             while not self.send_goal():
                 rospy.logwarn("Goal failed. Trying recovery...")
