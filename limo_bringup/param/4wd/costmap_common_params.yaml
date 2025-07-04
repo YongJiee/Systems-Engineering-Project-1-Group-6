@@ -1,10 +1,13 @@
-obstacle_range: 1.5 #2.5
-raytrace_range: 3.5 #3.5
-footprint: [[-0.16, -0.11], [-0.16, 0.11], [0.16, 0.11], [0.16, -0.11]]
-inflation_radius: 0.05 #0.3 0.1
-transform_tolerance: 0.13 #0.13
+map_type: voxel
 
-observation_sources: scan
+obstacle_range: 2.5
+raytrace_range: 3.5
+footprint: [[-0.16, -0.11], [-0.16, 0.11], [0.16, 0.11], [0.16, -0.11]]
+inflation_radius: 0.05  # minimal clearance for narrow paths
+transform_tolerance: 0.13
+
+observation_sources: scan depth_camera
+
 scan:
   data_type: LaserScan
   topic: scan
@@ -12,6 +15,9 @@ scan:
   clearing: true
   inf_is_valid: true
 
-map_type: costmap
-
+depth_camera:
+  data_type: PointCloud2
+  topic: /camera/depth/color/points
+  marking: true
+  clearing: true
 
