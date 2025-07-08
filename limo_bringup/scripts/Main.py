@@ -4,15 +4,16 @@
 import rospy
 import actionlib
 import math
-from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-from geometry_msgs.msg import Twist
-from nav_msgs.srv import GetPlan, GetPlanRequest
 from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist, Quaternion, PoseStamped
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from nav_msgs.msg import Odometry
+from nav_msgs.srv import GetPlan
 from tf.transformations import quaternion_from_euler
-from std_srvs.srv import Empty
 
-class SmartNavigator:
+class RecoveryNavigator:
     def __init__(self):
+<<<<<<< HEAD
         self.recovery_attempts = 0
         rospy.init_node('smart_navigation_node')
 
@@ -27,13 +28,21 @@ class SmartNavigator:
             (2.0, 3.0, -math.pi / 4),       # 7
             (3.0, 3.0, math.pi)             # 8
         ]
+=======
+        rospy.init_node('recovery_navigator')
+>>>>>>> parent of bf3a69d... Navigation with lidar working and fine tune revovery
 
-        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
-        rospy.loginfo("Waiting for move_base action server...")
+        self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
+
+        self.current_pose = None
+
+        rospy.loginfo("Waiting for move_base server...")
         self.client.wait_for_server()
         rospy.loginfo("Connected to move_base.")
 
+<<<<<<< HEAD
         self.make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
         self.make_plan.wait_for_service()
         rospy.loginfo("Connected to /move_base/make_plan service.")
@@ -175,17 +184,65 @@ class SmartNavigator:
         try:
             resp = self.make_plan(req)
             return len(resp.plan.poses) > 0
-        except rospy.ServiceException as e:
-            rospy.logerr("make_plan failed: %s", e)
+=======
+    def odom_callback(self, msg):
+        self.current_pose = msg.pose.pose
+
+    def can_plan_path(self, goal_pose):
+        if self.current_pose is None:
+            rospy.logwarn("Current pose unknown. Cannot plan.")
             return False
 
-    def run(self):
-        self.get_goals_from_params()
+        try:
+            rospy.wait_for_service('/move_base/make_plan', timeout=2.0)
+            make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
 
-        if len(self.goal_list) == 0:
-            rospy.logwarn("No goals provided. Exiting.")
-            return
+            start = PoseStamped()
+            start.header.frame_id = "map"
+            start.header.stamp = rospy.Time.now()
+            start.pose.position = self.current_pose.position
+            # Safe default orientation
+            start.pose.orientation.w = 1.0
 
+            goal_pose.header.stamp = rospy.Time.now()
+
+            resp = make_plan(start=start, goal=goal_pose, tolerance=0.1)
+            if not resp.plan.poses:
+                rospy.logwarn("make_plan returned empty path.")
+                return False
+
+            rospy.loginfo("make_plan returned valid path ({} poses).".format(len(resp.plan.poses)))
+            return True
+
+>>>>>>> parent of bf3a69d... Navigation with lidar working and fine tune revovery
+        except rospy.ServiceException as e:
+            rospy.logerr("make_plan service call failed: %s", e)
+            return False
+        except rospy.ROSException as e:
+            rospy.logerr("Timeout waiting for make_plan: %s", e)
+            return False
+
+    def recover_by_rotation_until_path_exists(self, goal_pose, timeout_sec=15):
+        rospy.logwarn("Starting recovery: rotate until path can be planned...")
+        twist = Twist()
+        twist.angular.z = 0.4
+
+        rate = rospy.Rate(10)
+        start_time = rospy.Time.now()
+
+        while not rospy.is_shutdown():
+            if rospy.Time.now() - start_time > rospy.Duration(timeout_sec):
+                rospy.logerr("Recovery timeout. Still no valid path.")
+                break
+
+            if self.can_plan_path(goal_pose):
+                rospy.loginfo("Path to goal is now available. Stopping recovery.")
+                break
+
+            self.cmd_pub.publish(twist)
+            rate.sleep()
+
+<<<<<<< HEAD
         for i, goal in enumerate(self.goal_list):
             self.recovery_attempts = 0
             self.current_goal = goal
@@ -200,20 +257,54 @@ class SmartNavigator:
                     rospy.logwarn("No path found after 5 seconds. Trying recovery...")
                     self.recover_smart()
                     start_time = rospy.Time.now()
+=======
+        self.cmd_pub.publish(Twist())  # stop robot
 
-            while not self.send_goal():
-                rospy.logwarn("Goal failed. Trying recovery...")
-                self.recover_smart()
-                while not self.can_make_plan():
-                    rospy.logwarn("Still no path. Trying recovery again...")
-                    self.recover_smart()
+    def send_goal_with_recovery(self, x, y, yaw_rad=0.0):
+        quat = quaternion_from_euler(0, 0, yaw_rad)
+>>>>>>> parent of bf3a69d... Navigation with lidar working and fine tune revovery
 
-        rospy.loginfo("Finished visiting all plots.")
+        goal = MoveBaseGoal()
+        goal.target_pose.header.frame_id = "map"
+        goal.target_pose.header.stamp = rospy.Time.now()
+        goal.target_pose.pose.position.x = x
+        goal.target_pose.pose.position.y = y
+        goal.target_pose.pose.orientation = Quaternion(*quat)
+
+        goal_pose = PoseStamped()
+        goal_pose.header = goal.target_pose.header
+        goal_pose.pose = goal.target_pose.pose
+
+        rospy.loginfo("Sending goal to x={:.2f}, y={:.2f}".format(x, y))
+        self.client.send_goal(goal)
+        success = self.client.wait_for_result(rospy.Duration(30))
+
+        if not success or self.client.get_state() != 3:
+            rospy.logwarn("Goal failed. Attempting recovery...")
+            self.recover_by_rotation_until_path_exists(goal_pose)
+            rospy.sleep(1.0)
+            rospy.loginfo("Retrying goal...")
+            self.client.send_goal(goal)
+            self.client.wait_for_result()
+
+        if self.client.get_state() == 3:
+            rospy.loginfo("Goal succeeded.\n")
+        else:
+            rospy.logerr("Goal retry failed.\n")
+
+    def run(self):
+        # Example goals
+        goals = [
+            (1.48, 0.48, 0.0),            # Point A
+            (0.68, -0.01, math.pi)        # Home
+        ]
+        for x, y, yaw in goals:
+            self.send_goal_with_recovery(x, y, yaw)
 
 if __name__ == '__main__':
     try:
-        nav = SmartNavigator()
-        nav.run()
+        node = RecoveryNavigator()
+        node.run()
     except rospy.ROSInterruptException:
         pass
 

@@ -1,6 +1,7 @@
 global_costmap:
   global_frame: map
   robot_base_frame: base_link
+<<<<<<< HEAD
   update_frequency: 1.0
   publish_frequency: 1.0
   static_map: false
@@ -31,3 +32,15 @@ global_costmap:
   inflation_layer:
     inflation_radius: 0.05
 
+=======
+  update_frequency: 0.3 #before: 5.0
+  publish_frequency: 0.3 #before 0.5
+  static_map: true 
+  transform_tolerance: 0.5
+  cost_scaling_factor: 10.0
+  inflation_radius: 0.1
+
+plugins:
+  - {name: obstacles_laser,           type: "costmap_2d::ObstacleLayer"}
+  - {name: inflation,                 type: "costmap_2d::InflationLayer"}
+>>>>>>> parent of bf3a69d... Navigation with lidar working and fine tune revovery

@@ -5,6 +5,7 @@ local_costmap:
   publish_frequency: 2.0
   static_map: false
   rolling_window: true
+<<<<<<< HEAD
   width: 0.8
   height: 0.8
   resolution: 0.025
@@ -41,4 +42,12 @@ local_costmap:
 
   inflation_layer:
     inflation_radius: 0.05
+=======
+  width: 0.5 
+  height: 0.5
+  resolution: 0.05 #increase to for higher res 0.025 #0.05
+  transform_tolerance: 0.5
+  cost_scaling_factor: 2.58
+inflation_radius: 0.01  #0.1
+>>>>>>> parent of bf3a69d... Navigation with lidar working and fine tune revovery
 
