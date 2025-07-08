@@ -1,18 +1,11 @@
-map_type: voxel
-
-obstacle_range: 2.5
-raytrace_range: 3.5
+obstacle_range: 1.5 #2.5
+raytrace_range: 3.5 #3.5
+#footprint: [[-0.10, -0.10], [-0.10, 0.10], [0.10, 0.10], [0.10, -0.10]]
 footprint: [[-0.16, -0.11], [-0.16, 0.11], [0.16, 0.11], [0.16, -0.11]]
-<<<<<<< HEAD
-inflation_radius: 0.05  # minimal clearance for narrow paths
-transform_tolerance: 0.13
+inflation_radius: 0.03 #0.3
+transform_tolerance: 0.25 #0.13
 
-observation_sources: scan depth_camera
-=======
-inflation_radius: 0.2 #0.3
-transform_tolerance: 0.13 #0.13
->>>>>>> parent of bf3a69d... Navigation with lidar working and fine tune revovery
-
+observation_sources: scan
 scan:
   data_type: LaserScan
   topic: scan
@@ -20,9 +13,5 @@ scan:
   clearing: true
   inf_is_valid: true
 
-depth_camera:
-  data_type: PointCloud2
-  topic: /camera/depth/color/points
-  marking: true
-  clearing: true
+map_type: costmap
 

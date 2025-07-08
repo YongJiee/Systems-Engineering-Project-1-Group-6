@@ -3,14 +3,12 @@
 
 import rospy
 import actionlib
-import math
-from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import Twist, Quaternion, PoseStamped
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-from nav_msgs.msg import Odometry
-from nav_msgs.srv import GetPlan
+from geometry_msgs.msg import Quaternion
 from tf.transformations import quaternion_from_euler
+import math
 
+<<<<<<< HEAD
 class RecoveryNavigator:
     def __init__(self):
 <<<<<<< HEAD
@@ -263,48 +261,48 @@ class RecoveryNavigator:
     def send_goal_with_recovery(self, x, y, yaw_rad=0.0):
         quat = quaternion_from_euler(0, 0, yaw_rad)
 >>>>>>> parent of bf3a69d... Navigation with lidar working and fine tune revovery
+=======
+# Define coordinates (x, y in meters)
+locations = {
+    "Home": (0.68, -0.01),
+    "Point A": (2, 0.0)  # Replace with your real world Point A coordinates
+}
 
-        goal = MoveBaseGoal()
-        goal.target_pose.header.frame_id = "map"
-        goal.target_pose.header.stamp = rospy.Time.now()
-        goal.target_pose.pose.position.x = x
-        goal.target_pose.pose.position.y = y
-        goal.target_pose.pose.orientation = Quaternion(*quat)
+def send_goal(client, x, y, yaw_rad=0.0):
+    quat = quaternion_from_euler(0, 0, yaw_rad)
 
-        goal_pose = PoseStamped()
-        goal_pose.header = goal.target_pose.header
-        goal_pose.pose = goal.target_pose.pose
+    goal = MoveBaseGoal()
+    goal.target_pose.header.frame_id = "map"
+    goal.target_pose.header.stamp = rospy.Time.now()
+>>>>>>> parent of 25772f2... Recovery mode not woring
 
-        rospy.loginfo("Sending goal to x={:.2f}, y={:.2f}".format(x, y))
-        self.client.send_goal(goal)
-        success = self.client.wait_for_result(rospy.Duration(30))
+    goal.target_pose.pose.position.x = x
+    goal.target_pose.pose.position.y = y
+    goal.target_pose.pose.orientation = Quaternion(*quat)
 
-        if not success or self.client.get_state() != 3:
-            rospy.logwarn("Goal failed. Attempting recovery...")
-            self.recover_by_rotation_until_path_exists(goal_pose)
-            rospy.sleep(1.0)
-            rospy.loginfo("Retrying goal...")
-            self.client.send_goal(goal)
-            self.client.wait_for_result()
+    rospy.loginfo("Sending goal: x={:.2f}, y={:.2f}, yaw={:.1f}°".format(x, y, math.degrees(yaw_rad)))
+    client.send_goal(goal)
+    client.wait_for_result()
+    rospy.loginfo("Goal reached.\n")
 
-        if self.client.get_state() == 3:
-            rospy.loginfo("Goal succeeded.\n")
-        else:
-            rospy.logerr("Goal retry failed.\n")
+def main():
+    rospy.init_node('home_to_a_and_back')
+    client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
+    rospy.loginfo("Waiting for move_base action server...")
+    client.wait_for_server()
+    rospy.loginfo("Connected to move_base.\n")
 
-    def run(self):
-        # Example goals
-        goals = [
-            (1.48, 0.48, 0.0),            # Point A
-            (0.68, -0.01, math.pi)        # Home
-        ]
-        for x, y, yaw in goals:
-            self.send_goal_with_recovery(x, y, yaw)
+    # Go to Point A
+    send_goal(client, *locations["Point A"], yaw_rad=0.0)
+
+    # Return to Home
+    send_goal(client, *locations["Home"], yaw_rad=math.pi)  # face opposite direction on return
+
+    rospy.loginfo("Returned to Home. Mission complete.")
 
 if __name__ == '__main__':
     try:
-        node = RecoveryNavigator()
-        node.run()
+        main()
     except rospy.ROSInterruptException:
         pass
 
