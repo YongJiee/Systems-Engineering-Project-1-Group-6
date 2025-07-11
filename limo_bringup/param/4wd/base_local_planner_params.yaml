@@ -39,4 +39,3 @@ DWAPlannerROS:
 
   use_dwa: true
   restore_defaults: false
-

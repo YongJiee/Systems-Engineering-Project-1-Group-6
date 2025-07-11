@@ -17,6 +17,5 @@ oscillation_distance: 0.2
 conservative_reset_dist: 3 #distance from an obstacle at which it will unstuck itself
 
 cost_factor: 1 #0.55 #1
-neutral_cost: 55 #66 #55
+neutral_cost: 66 #66 #55
 lethal_cost: 253
-

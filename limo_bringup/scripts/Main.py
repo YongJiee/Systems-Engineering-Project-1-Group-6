@@ -133,7 +133,7 @@ class RecoveryNavigator:
             rospy.logwarn("make_plan service failed: %s", str(e))
             return False
 
-    def has_room_to_rotate(self, min_clearance=0.4):
+    def has_room_to_rotate(self, min_clearance=0.25):
         if not self.scan_data or not self.scan_data.ranges:
             rospy.logwarn("No scan data available for rotation check.")
             return False
