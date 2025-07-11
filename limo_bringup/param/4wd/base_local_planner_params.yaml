@@ -1,36 +1,36 @@
 DWAPlannerROS:
   max_trans_vel: 0.30
   min_trans_vel: 0.01
-  max_vel_x: 1.5
-  min_vel_x: -0.025
+  max_vel_x: 0.9
+  min_vel_x: -0.05
   max_vel_y: 0.0
   min_vel_y: 0.0
-  max_rot_vel: 0.20
-  min_rot_vel: -0.20
-  acc_lim_x: 1
+  max_rot_vel: 0.40
+  min_rot_vel: -0.40
+  acc_lim_x: 0.9
   acc_lim_y: 0.0
   acc_lim_th: 5
   acc_lim_trans: 1.25
 
   prune_plan: false
 
-  xy_goal_tolerance: 0.25 #0.25
-  yaw_goal_tolerance: 0.20 #0.1
+  xy_goal_tolerance: 0.15 #0.25
+  yaw_goal_tolerance: 0.2 #0.1
   trans_stopped_vel: 0.1
   rot_stopped_vel: 0.1
   sim_time: 2.0
   sim_granularity: 0.1
-  angular_sim_granularity: 0.1
+  angular_sim_granularity: 0.05
   pdist_scale: 0.6
   gdist_scale: 0.8
-  path_distance_bias: 44.0
-  goal_distance_bias: 24.0
-  occdist_scale: 0.1 #0.03
+  path_distance_bias: 54.0
+  goal_distance_bias: 22.0
+  occdist_scale: 0.22 #0.03
   twirling_scale: 0.0
   stop_time_buffer: 0.5
   oscillation_reset_dist: 0.05
   oscillation_reset_angle: 0.2
-  forward_point_distance: 0.3
+  forward_point_distance: 0.2
   scaling_speed: 0.25
   max_scaling_factor: 0.2
   vx_samples: 20
