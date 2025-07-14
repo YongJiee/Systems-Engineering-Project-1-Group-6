@@ -31,15 +31,15 @@ class RecoveryNavigator:
         self.yaw_tolerance = 0.2  # radians
 
         self.plot_centers = [
-            (0.0, 0.0, 0.0),                # 0 - Home
+            (0.0, 0.0, 0.0),                  # 0 - Home
             (0.0, 0.0, 0.0),                  # 1
             (2.5, 0.2, math.pi / 2),          # 2
             (1.7, 0.5, 3.1),                  # 3 (Yong Zun)
             (0.0, 1.35, math.pi / 2),         # 4 (Jia Cheng)
             (3.0, 2.0, 0.0),                  # 5
-            (1.55,0.0, math.pi / 2),         # 6 (YJ)
-            (0.0, 0.0, -math.pi / 4),         # 7
-            (0.0, 0.0, -math.pi/2)               # 8
+            (1.55,0.0, math.pi / 2),          # 6 (YJ)
+            (1.49, -1.21, -math.pi / 2),      # 7 (Gomez)
+            (0.0, -1.25, -math.pi/2)          # 8 (Kieren)
         ]
 
         rospy.loginfo("Waiting for move_base and services...")
