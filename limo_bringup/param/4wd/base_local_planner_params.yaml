@@ -1,5 +1,5 @@
 DWAPlannerROS:
-  max_trans_vel: 0.30
+  max_trans_vel: 0.20 #0.3
   min_trans_vel: 0.01
   max_vel_x: 0.5
   min_vel_x: -0.08
@@ -15,7 +15,7 @@ DWAPlannerROS:
   prune_plan: false
 
   xy_goal_tolerance: 0.05 #0.15
-  yaw_goal_tolerance: 0.2 #0.1
+  yaw_goal_tolerance: 0.1 #0.1
   trans_stopped_vel: 0.1
   rot_stopped_vel: 0.1
   sim_time: 2.0
@@ -25,7 +25,7 @@ DWAPlannerROS:
   gdist_scale: 0.8
   path_distance_bias: 54.0
   goal_distance_bias: 22.0
-  occdist_scale: 0.10 #0.22
+  occdist_scale: 0.05 #0.10
   twirling_scale: 0.0
   stop_time_buffer: 0.5
   oscillation_reset_dist: 0.05

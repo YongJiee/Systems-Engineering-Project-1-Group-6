@@ -30,10 +30,10 @@ class RecoveryNavigator:
         self.position_tolerance = 0.3  # meters
 
         self.plot_centers = [
+            [(0.6, -0.4, 0.0)], #home
             [(0.0, 0.0, 0.0)],
-            [(0.5, 0.0, 0.0)],
-            [(2.5, 0.2, math.pi / 2)],
-            [(1.7, 0.5, 3.1)],
+            [(-0.67, -0.21, 0.0)],
+            [(-0.3, 0.96, 0.0)],
             [(0.0, 1.35, math.pi / 2)],
             [  # Plot 5 with two entrances and one goal
                 (1.8, 1.04, -math.pi/2),  # Entrance A
