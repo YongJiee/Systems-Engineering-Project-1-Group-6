@@ -22,24 +22,27 @@ class RecoveryNavigator:
 
         self.make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
         self.clear_costmaps = rospy.ServiceProxy('/move_base/clear_costmaps', Empty)
-        
+
         self.recovery_attempts = 0
         self.max_recovery_attempts = 10
         self.current_pose = None
         self.scan_data = None
         self.position_tolerance = 0.3  # meters
-        self.yaw_tolerance = 0.2  # radians
 
         self.plot_centers = [
-            (0.0, 0.0, 0.0),                  # 0 - Home
-            (0.0, 0.0, 0.0),                  # 1
-            (2.5, 0.2, math.pi / 2),          # 2
-            (1.7, 0.5, 3.1),                  # 3 (Yong Zun)
-            (0.0, 1.35, math.pi / 2),         # 4 (Jia Cheng)
-            (3.0, 2.0, 0.0),                  # 5
-            (1.55,0.0, math.pi / 2),          # 6 (YJ)
-            (1.49, -1.21, -math.pi / 2),      # 7 (Gomez)
-            (0.0, -1.25, -math.pi/2)          # 8 (Kieren)
+            [(0.0, 0.0, 0.0)],
+            [(0.5, 0.0, 0.0)],
+            [(2.5, 0.2, math.pi / 2)],
+            [(1.7, 0.5, 3.1)],
+            [(0.0, 1.35, math.pi / 2)],
+            [  # Plot 5 with two entrances and one goal
+                (1.8, 1.04, -math.pi/2),  # Entrance A
+                (0.91, 1.68, 0.0),        # Entrance B
+                (1.68, 1.71, -math.pi/2)  # Goal
+            ],
+            [(1.55, 0.0, math.pi / 2)],
+            [(1.49, -1.21, -math.pi / 2)],
+            [(0.0, -1.25, -math.pi / 2)]
         ]
 
         rospy.loginfo("Waiting for move_base and services...")
@@ -54,40 +57,9 @@ class RecoveryNavigator:
     def scan_callback(self, msg):
         self.scan_data = msg
 
-    def get_goals_from_params(self):
-        indices = rospy.get_param("~options", [1, 2, 3])
-        self.goal_list = []
-
-        for i in indices:
-            if 0 <= i < len(self.plot_centers):
-                x, y, theta = self.plot_centers[i]
-                q = quaternion_from_euler(0, 0, theta)
-                goal = MoveBaseGoal()
-                goal.target_pose.header.frame_id = "map"
-                goal.target_pose.header.stamp = rospy.Time.now()
-                goal.target_pose.pose.position.x = x
-                goal.target_pose.pose.position.y = y
-                goal.target_pose.pose.orientation = Quaternion(*q)
-                self.goal_list.append((i, goal))
-                rospy.loginfo("Goal #%d added: (%.2f, %.2f, %.2f rad)", i, x, y, theta)
-            else:
-                rospy.logwarn("Invalid goal index: %d", i)
-
-    def send_goal(self, goal):
-        self.client.send_goal(goal)
-        timeout = rospy.Duration(45)
-        finished = self.client.wait_for_result(timeout)
-        if finished:
-            state = self.client.get_state()
-            if state == 3:
-                rospy.loginfo("Goal reached successfully!")
-                return True
-            else:
-                rospy.logwarn("Goal failed with state: %d", state)
-        else:
-            rospy.logwarn("Goal timed out")
-            self.client.cancel_goal()
-        return self.check_goal_reached(goal)
+    def yaw_from_quaternion(self, q):
+        _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+        return yaw
 
     def check_goal_reached(self, goal):
         if not self.current_pose:
@@ -97,65 +69,54 @@ class RecoveryNavigator:
         robot_x = self.current_pose.position.x
         robot_y = self.current_pose.position.y
         distance = math.hypot(goal_x - robot_x, goal_y - robot_y)
-        goal_yaw = self.yaw_from_quaternion(goal.target_pose.pose.orientation)
-        robot_yaw = self.yaw_from_quaternion(self.current_pose.orientation)
-        yaw_error = abs((goal_yaw - robot_yaw + math.pi) % (2 * math.pi) - math.pi)
-        rospy.loginfo("Distance to goal: %.2f m | Yaw error: %.2f rad", distance, yaw_error)
-        if distance < self.position_tolerance and yaw_error < self.yaw_tolerance:
-            rospy.loginfo("Goal reached within tolerance!")
-            return True
-        elif distance < self.position_tolerance:
-            rospy.loginfo("Position reached, but orientation off by %.2f rad", yaw_error)
-            return True
-        return False
+        rospy.loginfo("Distance to goal: %.2f m", distance)
+        return distance < self.position_tolerance
 
-    def yaw_from_quaternion(self, q):
-        _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
-        return yaw
+    def send_goal(self, goal):
+        self.client.send_goal(goal)
+        timeout = rospy.Duration(45)
+        finished = self.client.wait_for_result(timeout)
+        if finished and self.client.get_state() == 3:
+            rospy.loginfo("Goal reached successfully!")
+            return True
+        else:
+            self.client.cancel_goal()
+            return self.check_goal_reached(goal)
 
-    def can_make_plan(self, goal):
-        if not self.current_pose:
-            rospy.logwarn("No current pose available for planning.")
-            return False
+    def can_make_plan(self, goal, start_pose=None):
         req = GetPlanRequest()
         req.start.header.frame_id = "map"
         req.start.header.stamp = rospy.Time.now()
-        req.start.pose.position = self.current_pose.position
-        req.start.pose.orientation = self.current_pose.orientation
+        req.start.pose = start_pose if start_pose else self.current_pose
         req.goal = goal.target_pose
         req.tolerance = 0.5
         try:
             resp = self.make_plan(req)
-            has_plan = len(resp.plan.poses) > 0
-            rospy.loginfo("Plan check: %s (%d poses)", "Valid" if has_plan else "Invalid", len(resp.plan.poses))
-            return has_plan
-        except Exception as e:
-            rospy.logwarn("make_plan service failed: %s", str(e))
+            return len(resp.plan.poses) > 0
+        except:
             return False
+
+    def build_goal(self, x, y, theta):
+        q = quaternion_from_euler(0, 0, theta)
+        goal = MoveBaseGoal()
+        goal.target_pose.header.frame_id = "map"
+        goal.target_pose.header.stamp = rospy.Time.now()
+        goal.target_pose.pose.position.x = x
+        goal.target_pose.pose.position.y = y
+        goal.target_pose.pose.orientation = Quaternion(*q)
+        return goal
 
     def has_room_to_rotate(self, min_clearance=0.25):
         if not self.scan_data or not self.scan_data.ranges:
             rospy.logwarn("No scan data available for rotation check.")
             return False
-        ranges = self.scan_data.ranges
-        valid_ranges = [r for r in ranges if not math.isinf(r) and not math.isnan(r) and r > 0]
+        valid_ranges = [r for r in self.scan_data.ranges if not math.isinf(r) and not math.isnan(r) and r > 0]
         if not valid_ranges:
             rospy.logwarn("All scan readings are invalid.")
             return False
         min_distance = min(valid_ranges)
-        can_rotate = min_distance > min_clearance
-        rospy.loginfo("Min clearance: %.2f m, Required: %.2f m, Can rotate: %s", 
-                     min_distance, min_clearance, can_rotate)
-        return can_rotate
-
-    def clear_costmap(self):
-        try:
-            self.clear_costmaps()
-            rospy.loginfo("Costmaps cleared successfully.")
-            return True
-        except Exception as e:
-            rospy.logwarn("Failed to clear costmaps: %s", str(e))
-            return False
+        rospy.loginfo("Min clearance: %.2f m, Required: %.2f m", min_distance, min_clearance)
+        return min_distance > min_clearance
 
     def rotate_until_path_found(self, goal, max_rotation_time=10.0):
         rospy.loginfo("Rotating to find valid path...")
@@ -180,68 +141,161 @@ class RecoveryNavigator:
         rospy.loginfo("Reversing slightly to escape tight space...")
         twist = Twist()
         twist.linear.x = -0.05
-        steps = max(3, 8 - self.recovery_attempts)
-        for _ in range(steps):
+        for _ in range(5):
             self.cmd_pub.publish(twist)
             rospy.sleep(0.1)
         self.cmd_pub.publish(Twist())
         rospy.sleep(0.5)
 
     def recovery_behavior(self, goal):
-        rospy.loginfo("Starting recovery behavior (attempt %d/%d)...", 
-                     self.recovery_attempts + 1, self.max_recovery_attempts)
-
-        self.clear_costmap()
+        rospy.loginfo("Attempting recovery... (attempt %d)", self.recovery_attempts + 1)
+        try:
+            self.clear_costmaps()
+        except:
+            rospy.logwarn("Costmap clearing failed")
 
         if self.has_room_to_rotate():
             self.rotate_until_path_found(goal)
         else:
             self.reverse_slightly()
+        rospy.sleep(1.0)
 
-        if self.can_make_plan(goal):
-            rospy.loginfo("Path found after recovery action. Waiting 1 second before retrying move...")
-            rospy.sleep(1.0)
+    def choose_best_entrance_to_plot5_goal(self):
+        entrance_indices = [0, 1]
+        goal_pose = self.plot_centers[5][2]
+        goal = self.build_goal(*goal_pose)
 
-        self.recovery_attempts += 1
-        rospy.loginfo("Recovery behavior completed, will retry sending goal...")
+        best_idx = None
+        best_total_length = float('inf')
+
+        for i in entrance_indices:
+            x, y, theta = self.plot_centers[5][i]
+            entrance_goal = self.build_goal(x, y, theta)
+
+            req1 = GetPlanRequest()
+            req1.start.header.frame_id = "map"
+            req1.start.header.stamp = rospy.Time.now()
+            req1.start.pose = self.current_pose
+            req1.goal = entrance_goal.target_pose
+            req1.tolerance = 0.5
+
+            req2 = GetPlanRequest()
+            req2.start.header.frame_id = "map"
+            req2.start.header.stamp = rospy.Time.now()
+            req2.start.pose = entrance_goal.target_pose.pose
+            req2.goal = goal.target_pose
+            req2.tolerance = 0.5
+
+            try:
+                resp1 = self.make_plan(req1)
+                resp2 = self.make_plan(req2)
+
+                len1 = sum(math.hypot(
+                    resp1.plan.poses[j+1].pose.position.x - resp1.plan.poses[j].pose.position.x,
+                    resp1.plan.poses[j+1].pose.position.y - resp1.plan.poses[j].pose.position.y
+                ) for j in range(len(resp1.plan.poses)-1))
+
+                len2 = sum(math.hypot(
+                    resp2.plan.poses[j+1].pose.position.x - resp2.plan.poses[j].pose.position.x,
+                    resp2.plan.poses[j+1].pose.position.y - resp2.plan.poses[j].pose.position.y
+                ) for j in range(len(resp2.plan.poses)-1))
+
+                total_len = len1 + len2
+                rospy.loginfo("Entrance %d: to entrance = %.2f, to goal = %.2f, total = %.2f", i, len1, len2, total_len)
+
+                if total_len < best_total_length:
+                    best_total_length = total_len
+                    best_idx = i
+            except Exception as e:
+                rospy.logwarn("Failed to evaluate entrance %d: %s", i, str(e))
+
+        return best_idx, goal
 
     def navigate_to_goal(self, idx, goal):
-        rospy.loginfo("Navigating to plot %d", idx)
+        rospy.loginfo("Navigating to plot %s", str(idx))
         self.recovery_attempts = 0
-        while not rospy.is_shutdown() and self.recovery_attempts < self.max_recovery_attempts:
+        while self.recovery_attempts < self.max_recovery_attempts and not rospy.is_shutdown():
             if self.can_make_plan(goal):
-                success = self.send_goal(goal)
-                if success:
-                    rospy.loginfo("Successfully reached plot %d!", idx)
+                if self.send_goal(goal):
+                    rospy.loginfo("Reached plot %s", str(idx))
                     return True
-                else:
-                    rospy.logwarn("Failed to reach plot %d, attempting recovery...", idx)
-                    self.recovery_behavior(goal)
-            else:
-                rospy.logwarn("No valid plan to plot %d, attempting recovery...", idx)
-                self.recovery_behavior(goal)
-        rospy.logerr("Failed to reach plot %d after %d recovery attempts", idx, self.max_recovery_attempts)
+            self.recovery_behavior(goal)
+            self.recovery_attempts += 1
+        rospy.logerr("Failed to reach plot %s after recovery", str(idx))
         return False
 
     def run(self):
-        self.get_goals_from_params()
-        if not self.goal_list:
-            rospy.logerr("No valid goals found!")
-            return
-        rospy.loginfo("Starting navigation sequence with %d goals", len(self.goal_list))
-        for idx, goal in self.goal_list:
-            if not self.navigate_to_goal(idx, goal):
-                rospy.logerr("Mission failed at plot %d", idx)
-                break
-            rospy.sleep(1.0)
-        rospy.loginfo("Navigation sequence completed!")
+        route = rospy.get_param("~options", [5])
+        rospy.loginfo("Executing route: %s", route)
+
+        for i, plot in enumerate(route):
+            if plot == 5:
+                entrance_idx, final_goal = self.choose_best_entrance_to_plot5_goal()
+                if entrance_idx is None:
+                    rospy.logerr("No valid path to plot 5 goal.")
+                    return
+                entrance_pose = self.plot_centers[5][entrance_idx]
+                entrance_goal = self.build_goal(*entrance_pose)
+
+                if not self.navigate_to_goal("5 entrance %d" % entrance_idx, entrance_goal):
+                    return
+                rospy.sleep(1.0)
+
+                if not self.navigate_to_goal("5 goal", final_goal):
+                    return
+                rospy.sleep(1.0)
+
+                # Look ahead for next plot to determine best exit
+                next_plot = route[i + 1] if i + 1 < len(route) else None
+                if next_plot is not None and 0 <= next_plot < len(self.plot_centers):
+                    next_goal_pose = self.plot_centers[next_plot][0]
+                    best_exit_idx = None
+                    shortest_len = float('inf')
+                    for j in [0, 1]:
+                        exit_pose = self.plot_centers[5][j]
+                        exit_goal = self.build_goal(*exit_pose)
+                        req = GetPlanRequest()
+                        req.start.header.frame_id = "map"
+                        req.start.header.stamp = rospy.Time.now()
+                        req.start.pose = exit_goal.target_pose.pose
+                        req.goal = self.build_goal(*next_goal_pose).target_pose
+                        req.tolerance = 0.5
+                        try:
+                            resp = self.make_plan(req)
+                            length = sum(math.hypot(
+                                resp.plan.poses[k+1].pose.position.x - resp.plan.poses[k].pose.position.x,
+                                resp.plan.poses[k+1].pose.position.y - resp.plan.poses[k].pose.position.y
+                            ) for k in range(len(resp.plan.poses)-1))
+                            rospy.loginfo("Exit %d to next plot: %.2f", j, length)
+                            if length < shortest_len:
+                                shortest_len = length
+                                best_exit_idx = j
+                        except Exception as e:
+                            rospy.logwarn("Exit %d plan failed: %s", j, str(e))
+
+                    if best_exit_idx is not None:
+                        exit_pose = self.plot_centers[5][best_exit_idx]
+                        exit_goal = self.build_goal(*exit_pose)
+                        if not self.navigate_to_goal("5 exit %d" % best_exit_idx, exit_goal):
+                            return
+                        rospy.sleep(1.0)
+            else:
+                if 0 <= plot < len(self.plot_centers):
+                    for j, (x, y, theta) in enumerate(self.plot_centers[plot]):
+                        goal = self.build_goal(x, y, theta)
+                        label = "%d.%d" % (plot, j) if len(self.plot_centers[plot]) > 1 else str(plot)
+                        if not self.navigate_to_goal(label, goal):
+                            return
+                        rospy.sleep(1.0)
+                else:
+                    rospy.logwarn("Invalid plot index: %d", plot)
+
+        rospy.loginfo("Navigation route completed.")
 
 if __name__ == '__main__':
     try:
         navigator = RecoveryNavigator()
         navigator.run()
     except rospy.ROSInterruptException:
-        rospy.loginfo("Navigation interrupted by user")
-    except Exception as e:
-        rospy.logerr("Navigation failed with error: %s", str(e))
+        pass
 

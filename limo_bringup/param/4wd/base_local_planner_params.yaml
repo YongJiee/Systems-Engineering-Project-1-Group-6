@@ -7,14 +7,14 @@ DWAPlannerROS:
   min_vel_y: 0.0
   max_rot_vel: 0.40
   min_rot_vel: -0.40
-  acc_lim_x: 0.9
+  acc_lim_x: 0.5
   acc_lim_y: 0.0
   acc_lim_th: 5
   acc_lim_trans: 1.25
 
   prune_plan: false
 
-  xy_goal_tolerance: 0.15 #0.25
+  xy_goal_tolerance: 0.05 #0.15
   yaw_goal_tolerance: 0.2 #0.1
   trans_stopped_vel: 0.1
   rot_stopped_vel: 0.1
