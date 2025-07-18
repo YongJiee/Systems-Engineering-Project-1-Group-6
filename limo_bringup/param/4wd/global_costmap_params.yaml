@@ -1,23 +1,13 @@
 global_costmap:
+  global_frame: map
+  robot_base_frame: base_link
+  update_frequency: 0.3 #before: 5.0
+  publish_frequency: 0.3 #before 0.5
+  static_map: true 
+  transform_tolerance: 0.5
+  cost_scaling_factor: 7.0
+  inflation_radius: 0.03 #0.05
 
-  # --- Coordinate Frames ---
-  global_frame: map                # Global fixed frame for path planning
-  robot_base_frame: base_link      # Robot's base frame used for TF transforms
-
-  # --- Update & Publish Rates ---
-  update_frequency: 0.3            # Costmap updates at 0.3 Hz (low CPU load) [was 5.0]
-  publish_frequency: 0.3           # Costmap published at 0.3 Hz [was 0.5]
-
-  # --- Map Behavior ---
-  static_map: true                 # Use static map from SLAM or map server
-  transform_tolerance: 0.5         # TF lookup timeout before discarding transforms
-
-  # --- Inflation Settings ---
-  cost_scaling_factor: 7.0         # Steep cost drop-off near obstacles (narrow walls)
-  inflation_radius: 0.03           # Inflate costs slightly around obstacles [was 0.05]
-
-  # --- Costmap Layers ---
-  plugins:
-    - {name: obstacles_laser, type: "costmap_2d::ObstacleLayer"}   # Uses LIDAR data to mark/clear obstacles
-    - {name: inflation,       type: "costmap_2d::InflationLayer"}  # Inflates costs around obstacles
-
+plugins:
+  - {name: obstacles_laser,           type: "costmap_2d::ObstacleLayer"}
+  - {name: inflation,                 type: "costmap_2d::InflationLayer"}

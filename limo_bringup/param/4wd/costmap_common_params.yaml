@@ -1,25 +1,16 @@
-# --- Sensor Ranges ---
-obstacle_range: 1.5              # Max distance to detect obstacles from LIDAR (was 2.5)
-raytrace_range: 3.5              # Max range for clearing free space using raytracing
+obstacle_range: 1.5 #2.5
+raytrace_range: 3.5 #3.5
 
-# --- Robot Footprint & Inflation ---
 footprint: [[-0.16, -0.11], [-0.16, 0.11], [0.16, 0.11], [0.16, -0.11]]
-                                 # Rectangle footprint (length: 32cm, width: 22cm)
-inflation_radius: 0.02           # Inflate costs around obstacles for safety margin [was 0.05]
+inflation_radius: 0.02 #0.05
+transform_tolerance: 0.25 #0.13
 
-# --- TF & Transformation Handling ---
-transform_tolerance: 0.25        # Max allowed TF lookup delay (was 0.13)
-
-# --- Obstacle Layer Source ---
-observation_sources: scan        # Active sensors for marking/clearing obstacles
-
+observation_sources: scan
 scan:
-  data_type: LaserScan           # Sensor message type
-  topic: scan                    # Topic name to subscribe to
-  marking: true                  # Mark obstacles in costmap
-  clearing: true                 # Clear free space from costmap
-  inf_is_valid: true             # Treat infinite LIDAR readings as valid free space
+  data_type: LaserScan
+  topic: scan
+  marking: true
+  clearing: true
+  inf_is_valid: true
 
-# --- Costmap Type ---
-map_type: costmap                # Standard layered 2D costmap
-
+map_type: costmap

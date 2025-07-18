@@ -1,59 +1,41 @@
 DWAPlannerROS:
-
-  # --- Velocity Limits ---
-  max_trans_vel: 0.10            # Reduced max translational speed for careful movement [was 0.3]
-  min_trans_vel: 0.01            # Below this is considered stopped
-  max_vel_x: 0.2                 # Max forward speed
-  min_vel_x: -0.05               # Allow slight reverse movement (helps recovery)
-  max_vel_y: 0.0                 # No lateral movement (non-holonomic robot)
+  max_trans_vel: 0.10 #0.3
+  min_trans_vel: 0.0 #0.01
+  max_vel_x: 0.2
+  min_vel_x: -0.05
+  max_vel_y: 0.0
   min_vel_y: 0.0
-  max_rot_vel: 0.40              # Max rotational velocity (rad/s)
-  min_rot_vel: -0.40             # Allow rotation in both directions
+  max_rot_vel: 0.40
+  min_rot_vel: -0.40
+  acc_lim_x: 0.5
+  acc_lim_y: 0.0
+  acc_lim_th: 2 #5
+  acc_lim_trans: 1.25
 
-  # --- Acceleration Limits ---
-  acc_lim_x: 0.5                 # Conservative linear acceleration
-  acc_lim_y: 0.0                 # Not used for diff-drive robots
-  acc_lim_th: 2                  # Lower rotational acceleration for smoother turns [was 5]
-  acc_lim_trans: 1.25            # Max translational acceleration
+  prune_plan: false
 
-  # --- Plan Handling ---
-  prune_plan: false              # Keep the full global plan (don't prune behind robot)
+  xy_goal_tolerance: 0.05 #0.15
+  yaw_goal_tolerance: 0.1 #0.1
+  trans_stopped_vel: 0.1
+  rot_stopped_vel: 0.1
+  sim_time: 2.0
+  sim_granularity: 0.1 #0.1
+  angular_sim_granularity: 0.03 #0.05
+  pdist_scale: 0.6
+  gdist_scale: 0.8
+  path_distance_bias: 54.0
+  goal_distance_bias: 22.0
+  occdist_scale: 0.03 #0.10
+  twirling_scale: 0.0
+  stop_time_buffer: 0.5
+  oscillation_reset_dist: 0.05
+  oscillation_reset_angle: 0.2
+  forward_point_distance: 0.2
+  scaling_speed: 0.25
+  max_scaling_factor: 0.2
+  vx_samples: 20
+  vy_samples: 0
+  vth_samples: 60
 
-  # --- Goal Tolerances ---
-  xy_goal_tolerance: 0.05        # Stop very precisely at goal position [was 0.15]
-  yaw_goal_tolerance: 0.1        # Orientation tolerance at goal (radians)
-  trans_stopped_vel: 0.1         # Below this = translational stop
-  rot_stopped_vel: 0.1           # Below this = rotational stop
-
-  # --- Trajectory Simulation ---
-  sim_time: 2.0                  # Simulate 2 seconds ahead
-  sim_granularity: 0.1           # Step size in linear simulation (m)
-  angular_sim_granularity: 0.03  # Finer angular steps = smoother turns [was 0.05]
-
-  # --- Cost Function Weights ---
-  pdist_scale: 0.6               # Prefer staying on the global path
-  gdist_scale: 0.8               # Progress toward the global goal
-  path_distance_bias: 54.0       # Strongly bias path following
-  goal_distance_bias: 22.0       # Balance between goal progress and path following
-  occdist_scale: 0.03            # Very low = willing to move very close to obstacles [was 0.10]
-  twirling_scale: 0.0            # No penalty for in-place rotation
-
-  # --- Recovery & Oscillation ---
-  stop_time_buffer: 0.5          # Time before predicted collision to stop
-  oscillation_reset_dist: 0.05   # Reset stuck flag after moving this far
-  oscillation_reset_angle: 0.2   # Or rotating this much
-
-  # --- Footprint Scaling ---
-  forward_point_distance: 0.2    # Distance ahead for scoring
-  scaling_speed: 0.25            # Begin scaling robot footprint below this speed
-  max_scaling_factor: 0.2        # Max footprint scaling factor near obstacles
-
-  # --- Sampling Parameters ---
-  vx_samples: 20                 # Number of forward velocity samples
-  vy_samples: 0                  # No lateral sampling
-  vth_samples: 60                # High rotational sampling (better for tight spaces)
-
-  # --- Planner Mode ---
-  use_dwa: true                  # Use Dynamic Window Approach (vs trajectory rollout)
-  restore_defaults: false        # Don’t override these custom settings
-
+  use_dwa: true
+  restore_defaults: false
