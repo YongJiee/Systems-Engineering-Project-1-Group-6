@@ -30,15 +30,15 @@ class RecoveryNavigator:
         self.position_tolerance = 0.3
 
         self.plot_centers = [
-            [(0.0, 0.0, 0.0)],              # Home
-            [(-1.39, -1.45, 0.0)],          # Leon
-            [(-1.42, -0.07, 0.0)],           # Wei Qing
-            [(-1.52, 1.12, 0.0)],           # Yong Zun
-            [(-0.13, 1.26, math.pi/2)],     # Jia Cheng
-            [(1.68, 1.70, -math.pi/2)],     # YT (single goal only)
-            [(1.53, 0.0, math.pi / 2)],     # Yong Jie
-            [(1.55, -1.16, -math.pi / 2)],  # Gomez
-            [(0.05, -1.34, -math.pi / 2)]  # Kieren
+            [(-0.03, -0.05, 0.0)],              # Home
+            [(-1.36, -1.51, 0.0)],          # Leon
+            [(-1.46, -0.15, 0.0)],           # Wei Qing
+            [(-1.58, 1.11, 0.0)],           # Yong Zun
+            [(-0.15, 1.15, math.pi/2)],     # Jia Cheng
+            [(1.66, 1.59, -math.pi/2)],     # YT (single goal only)
+            [(1.49, 0.06, math.pi / 2)],     # Yong Jie
+            [(1.52, -1.16, -math.pi / 2)],  # Gomez
+            [(-0.02, -1.25, -math.pi / 2)]  # Kieren
         ]
 
         rospy.loginfo("Waiting for move_base and services...")
