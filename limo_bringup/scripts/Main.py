@@ -121,11 +121,11 @@ class RecoveryNavigator:
         end_index = min(len(ranges), end_index)
 
         clear_count = sum(1 for r in ranges[start_index:end_index] if r > min_clearance)
-
         rospy.loginfo("Clearance rays in ±90°: %d", clear_count)
+
         return clear_count >= required_clear_count
 
-    def rotate_until_path_found(self, goal, max_rotation_time=10.0):
+    def rotate_until_path_found(self, goal, max_rotation_time=10.0, min_rotation_duration=1.0):
         rospy.loginfo("Rotating left and right to find a valid path...")
 
         twist = Twist()
@@ -133,19 +133,34 @@ class RecoveryNavigator:
         rotate_duration = max_rotation_time / 2.0
         rate = rospy.Rate(10)
 
-        for direction in [1, -1]:  # Left, then right
+        for direction in [1, -1]:  # Try left, then right
             twist.angular.z = direction * angular_speed
             start_time = rospy.Time.now()
+
+            if not self.current_pose:
+                continue
+            q = self.current_pose.orientation
+            _, _, yaw_start = euler_from_quaternion([q.x, q.y, q.z, q.w])
 
             while (rospy.Time.now() - start_time).to_sec() < rotate_duration and not rospy.is_shutdown():
                 self.cmd_pub.publish(twist)
                 rospy.sleep(0.1)
-                if self.can_make_plan(goal):
-                    rospy.loginfo("Valid path found while rotating %s!",
-                                  "left" if direction == 1 else "right")
-                    self.cmd_pub.publish(Twist())
-                    rospy.sleep(0.5)
-                    return
+
+                elapsed = (rospy.Time.now() - start_time).to_sec()
+                if elapsed >= min_rotation_duration:
+                    if self.can_make_plan(goal):
+                        if self.current_pose:
+                            q = self.current_pose.orientation
+                            _, _, yaw_now = euler_from_quaternion([q.x, q.y, q.z, q.w])
+                            delta_yaw = abs(yaw_now - yaw_start)
+                            if delta_yaw > 0.1:  # about 6 degrees
+                                rospy.loginfo("Valid path found after %.1f° rotation!", math.degrees(delta_yaw))
+                                self.cmd_pub.publish(Twist())
+                                rospy.sleep(0.5)
+                                return
+                            else:
+                                rospy.logwarn("Path found but robot did not rotate enough (%.2f rad)", delta_yaw)
+
                 rate.sleep()
 
         rospy.logwarn("Rotation did not find a valid path.")
@@ -164,15 +179,19 @@ class RecoveryNavigator:
 
     def recovery_behavior(self, goal):
         rospy.loginfo("Attempting recovery... (attempt %d)", self.recovery_attempts + 1)
-        try:
-            self.clear_costmaps()
-        except:
-            rospy.logwarn("Costmap clearing failed")
+
+        if self.recovery_attempts == 0:
+            try:
+                self.clear_costmaps()
+                rospy.loginfo("Costmaps cleared.")
+            except:
+                rospy.logwarn("Costmap clearing failed")
 
         if self.has_room_to_rotate():
             self.rotate_until_path_found(goal)
         else:
             self.reverse_slightly()
+
         rospy.sleep(1.0)
 
     def navigate_to_goal(self, idx, goal):
