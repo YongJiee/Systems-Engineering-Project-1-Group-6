@@ -31,14 +31,14 @@ class RecoveryNavigator:
 
         self.plot_centers = [
             [(-0.03, -0.05, 0.0)],              # Home
-            [(-1.36, -1.51, 0.0)],          # Leon
-            [(-1.46, -0.15, 0.0)],           # Wei Qing
-            [(-1.58, 1.11, 0.0)],           # Yong Zun
-            [(-0.15, 1.15, math.pi/2)],     # Jia Cheng
-            [(1.66, 1.59, -math.pi/2)],     # YT (single goal only)
-            [(1.49, 0.06, math.pi / 2)],     # Yong Jie
-            [(1.52, -1.16, -math.pi / 2)],  # Gomez
-            [(-0.02, -1.25, -math.pi / 2)]  # Kieren
+            [(-1.36, -1.51, 0.0)],              # Leon
+            [(-1.46, -0.15, 0.0)],              # Wei Qing
+            [(-1.58, 1.11, 0.0)],               # Yong Zun
+            [(-0.15, 1.15, math.pi/2)],         # Jia Cheng
+            [(1.66, 1.59, -math.pi/2)],         # YT
+            [(1.49, 0.06, math.pi / 2)],        # Yong Jie
+            [(1.52, -1.16, -math.pi / 2)],      # Gomez
+            [(-0.02, -1.25, -math.pi / 2)]      # Kieren
         ]
 
         rospy.loginfo("Waiting for move_base and services...")
@@ -102,38 +102,53 @@ class RecoveryNavigator:
         goal.target_pose.pose.orientation = Quaternion(*q)
         return goal
 
-    def has_room_to_rotate(self, min_clearance=0.25):
+    def has_room_to_rotate(self, min_clearance=0.25, required_clear_count=10):
         if not self.scan_data or not self.scan_data.ranges:
             return False
 
-        # Only check left (90°) and right (-90°)
-        left_idx = len(self.scan_data.ranges) // 4
-        right_idx = 3 * len(self.scan_data.ranges) // 4
+        ranges = self.scan_data.ranges
+        angle_min = self.scan_data.angle_min
+        angle_increment = self.scan_data.angle_increment
 
-        left_clear = self.scan_data.ranges[left_idx] > min_clearance
-        right_clear = self.scan_data.ranges[right_idx] > min_clearance
+        half_fov = math.pi / 2  # ±90 degrees
+        start_angle = -half_fov
+        end_angle = half_fov
 
-        rospy.loginfo("Left clearance: %.2f, Right clearance: %.2f",
-                      self.scan_data.ranges[left_idx], self.scan_data.ranges[right_idx])
+        start_index = int((start_angle - angle_min) / angle_increment)
+        end_index = int((end_angle - angle_min) / angle_increment)
 
-        return left_clear or right_clear
+        start_index = max(0, start_index)
+        end_index = min(len(ranges), end_index)
+
+        clear_count = sum(1 for r in ranges[start_index:end_index] if r > min_clearance)
+
+        rospy.loginfo("Clearance rays in ±90°: %d", clear_count)
+        return clear_count >= required_clear_count
 
     def rotate_until_path_found(self, goal, max_rotation_time=10.0):
-        rospy.loginfo("Rotating to find valid path...")
+        rospy.loginfo("Rotating left and right to find a valid path...")
+
         twist = Twist()
-        twist.angular.z = 0.3
+        angular_speed = 0.5  # rad/s
+        rotate_duration = max_rotation_time / 2.0
         rate = rospy.Rate(10)
-        start_time = rospy.Time.now()
-        while not rospy.is_shutdown():
-            if (rospy.Time.now() - start_time).to_sec() > max_rotation_time:
-                rospy.logwarn("Rotation timeout reached.")
-                break
-            self.cmd_pub.publish(twist)
-            rospy.sleep(0.1)
-            if self.can_make_plan(goal):
-                rospy.loginfo("Valid path found during rotation!")
-                break
-            rate.sleep()
+
+        for direction in [1, -1]:  # Left, then right
+            twist.angular.z = direction * angular_speed
+            start_time = rospy.Time.now()
+
+            while (rospy.Time.now() - start_time).to_sec() < rotate_duration and not rospy.is_shutdown():
+                self.cmd_pub.publish(twist)
+                rospy.sleep(0.1)
+                if self.can_make_plan(goal):
+                    rospy.loginfo("Valid path found while rotating %s!",
+                                  "left" if direction == 1 else "right")
+                    self.cmd_pub.publish(Twist())
+                    rospy.sleep(0.5)
+                    return
+                rate.sleep()
+
+        rospy.logwarn("Rotation did not find a valid path.")
         self.cmd_pub.publish(Twist())
         rospy.sleep(0.5)
 
