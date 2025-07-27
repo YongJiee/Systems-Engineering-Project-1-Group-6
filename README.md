@@ -45,18 +45,18 @@ Our goal was to develop a reliable indoor navigation system using the AgileX LIM
 ## Launch Instructions
 
 ### RTAB-Map Mapping Mode
-roslaunch limo_bringup limo_start.launch pub_odom_tf:=false
-roslaunch astra_camera dabai_u3.launch
-roslaunch limo_bringup limo_rtabmap_orbbec.launch
-roslaunch limo_bringup rtabmap_rviz.launch
+- roslaunch limo_bringup limo_start.launch pub_odom_tf:=false
+- roslaunch astra_camera dabai_u3.launch
+- roslaunch limo_bringup limo_rtabmap_orbbec.launch
+- roslaunch limo_bringup rtabmap_rviz.launch
 
 ### RTAB-Map Navigation Mode (with Localization)
-roslaunch limo_bringup limo_start.launch pub_odom_tf:=false
-roslaunch astra_camera dabai_u3.launch
-roslaunch limo_bringup limo_rtabmap_orbbec.launch localization:=true
-roslaunch limo_bringup limo_navigation_rtabmap.launch
-roslaunch limo_bringup rtabmap_rviz.launch
+- roslaunch limo_bringup limo_start.launch pub_odom_tf:=false
+- roslaunch astra_camera dabai_u3.launch
+- roslaunch limo_bringup limo_rtabmap_orbbec.launch localization:=true
+- roslaunch limo_bringup limo_navigation_rtabmap.launch
+- roslaunch limo_bringup rtabmap_rviz.launch
 
 ### Running Autonomous Behavior Script
-rosrun limo_bringup Main.py _options:="[6]"
+- rosrun limo_bringup Main.py _options:="[6]"
 
