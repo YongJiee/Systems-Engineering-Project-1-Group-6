@@ -54,11 +54,10 @@ class RecoveryNavigator:
         self.rotation_speed = rospy.get_param('~rotation_speed', 0.3)
         self.backup_distance = rospy.get_param('~backup_distance', 0.2)
         
-        # Recovery behavior configuration - ordered from least to most invasive
+        # Recovery behavior configuration - LIMO-optimized order
         self.recovery_behaviors = [
-            self.wait_and_retry_recovery,      # Just wait - simplest first
-            self.reverse_recovery,             # Back up to escape tight space
-            self.rotate_recovery,              # Rotate to find new path
+            self.simple_reverse_recovery,      # Most effective for LIMO - just back up
+            self.rotate_recovery,              # Rotate to find new path  
             self.clear_costmaps_recovery,      # Clear stale costmap data
             self.wiggle_recovery,              # Small movements to escape
             self.aggressive_clear_recovery     # Last resort
@@ -389,86 +388,56 @@ class RecoveryNavigator:
         
         return self.can_make_plan(goal)
 
-    def reverse_recovery(self, goal):
-        """Recovery behavior: Back up in a straight line"""
-        rospy.loginfo("Recovery: Reversing to escape tight space...")
+    def simple_reverse_recovery(self, goal):
+        """Recovery behavior: Simple reverse for LIMO robot"""
+        rospy.loginfo("Recovery: Simple reverse maneuver...")
         self.state = RecoveryState.BACKING_UP
         self.reset_move_base_client()
         
-        # Check if it's safe to reverse
-        surroundings = self.analyze_surroundings()
+        # LIMO-specific parameters
+        reverse_distance = 0.03  # 15cm - small but effective for LIMO
+        reverse_speed = 0.06     # Slow and controlled
+        
+        # Basic safety check - ensure we're not completely surrounded
         scan_data = self.get_scan_data()
-        
-        if not scan_data:
-            rospy.logwarn("No scan data available for safe reversal")
-            return False
-        
-        # Check rear clearance (roughly 180° from front)
-        ranges = scan_data.ranges
-        if not ranges:
-            return False
+        if scan_data and scan_data.ranges:
+            # Quick check: is there reasonable space behind us?
+            ranges = scan_data.ranges
+            rear_sector = ranges[-30:] + ranges[:30]  # Rough rear 60° sector
+            valid_ranges = [r for r in rear_sector if not (math.isinf(r) or math.isnan(r)) and r > 0]
             
-        # Get rear-facing laser readings (assume front is 0°, rear is ±180°)
-        rear_ranges = []
-        total_ranges = len(ranges)
+            if valid_ranges and min(valid_ranges) < 0.25:
+                rospy.logwarn("Rear appears blocked (%.2f m), skipping reverse", min(valid_ranges))
+                return False
         
-        # Take readings from rear 60° sector (±30° around 180°)
-        rear_start = int(total_ranges * 0.75)  # Around 270°
-        rear_end = int(total_ranges * 0.25)    # Around 90°
-        
-        # Collect rear readings (wrapping around)
-        for i in range(rear_start, total_ranges):
-            if not (math.isinf(ranges[i]) or math.isnan(ranges[i])):
-                rear_ranges.append(ranges[i])
-        for i in range(0, rear_end):
-            if not (math.isinf(ranges[i]) or math.isnan(ranges[i])):
-                rear_ranges.append(ranges[i])
-        
-        # Check if rear is clear
-        if rear_ranges and min(rear_ranges) < 0.4:
-            rospy.logwarn("Rear path blocked (min distance: %.2f m), cannot reverse safely", 
-                         min(rear_ranges) if rear_ranges else 0)
-            return False
-        
-        # Perform controlled reverse
-        reverse_distance = min(0.3, self.backup_distance)  # Max 30cm
-        reverse_speed = 0.08  # Slow and safe
-        reverse_time = reverse_distance / reverse_speed
-        
+        # Simple timed reverse
         twist = Twist()
         twist.linear.x = -reverse_speed
         
-        rospy.loginfo("Reversing %.2f m at %.2f m/s", reverse_distance, reverse_speed)
+        reverse_time = reverse_distance / reverse_speed  # About 2.5 seconds
         
+        rospy.loginfo("LIMO reversing %.2f m at %.2f m/s for %.1f seconds", 
+                     reverse_distance, reverse_speed, reverse_time)
+        
+        # Execute reverse
         start_time = rospy.Time.now()
-        rate = rospy.Rate(20)  # High frequency for safety
+        rate = rospy.Rate(10)
         
         while (rospy.Time.now() - start_time).to_sec() < reverse_time and not rospy.is_shutdown():
-            # Continuously check rear during reverse
-            current_scan = self.get_scan_data()
-            if current_scan and current_scan.ranges:
-                current_rear = []
-                for i in range(rear_start, len(current_scan.ranges)):
-                    if not (math.isinf(current_scan.ranges[i]) or math.isnan(current_scan.ranges[i])):
-                        current_rear.append(current_scan.ranges[i])
-                for i in range(0, rear_end):
-                    if not (math.isinf(current_scan.ranges[i]) or math.isnan(current_scan.ranges[i])):
-                        current_rear.append(current_scan.ranges[i])
-                
-                if current_rear and min(current_rear) < 0.2:  # Emergency stop
-                    rospy.logwarn("Emergency stop during reverse!")
-                    break
-            
             self.cmd_pub.publish(twist)
             rate.sleep()
         
+        # Stop and settle
         self.stop_robot()
-        rospy.sleep(0.5)  # Let robot settle
+        rospy.sleep(0.3)
         
+        # Check if this opened up a path
         success = self.can_make_plan(goal)
         if success:
-            rospy.loginfo("Reverse recovery successful - path now available")
-        
+            rospy.loginfo("Simple reverse successful - path now clear")
+        else:
+            rospy.loginfo("Reverse completed but path still blocked")
+            
         return success
 
     def wiggle_recovery(self, goal):
