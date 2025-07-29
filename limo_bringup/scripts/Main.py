@@ -27,18 +27,18 @@ class RecoveryNavigator:
         self.max_recovery_attempts = 10
         self.current_pose = None
         self.scan_data = None
-        self.position_tolerance = 0.3
+        self.position_tolerance = 0.05
 
         self.plot_centers = [
-            [(-0.03, -0.05, 0.0)],              # Home
-            [(-1.36, -1.51, 0.0)],              # Leon
-            [(-1.46, -0.15, 0.0)],              # Wei Qing
-            [(-1.58, 1.11, 0.0)],               # Yong Zun
-            [(-0.15, 1.15, math.pi/2)],         # Jia Cheng
-            [(1.66, 1.59, -math.pi/2)],         # YT
-            [(1.49, 0.06, math.pi / 2)],        # Yong Jie
-            [(1.52, -1.16, -math.pi / 2)],      # Gomez
-            [(-0.02, -1.25, -math.pi / 2)]      # Kieren
+            [(0.00, -0.07, 0.0)],               # Home
+            [(-1.09, -1.40, 0.0)],              # Leon
+            [(-1.43, -0.07, 0.0)],              # Wei Qing
+            [(-1.43, 1.24, 0.0)],               # Yong Zun
+            [(-0.08, 1.28, math.pi/2)],         # Jia Cheng
+            [(1.67, 1.68, -math.pi/2)],         # YT
+            [(1.46, -0.07, math.pi / 2)],       # Yong Jie
+            [(1.46, -1.20, -math.pi / 2)],      # Gomez
+            [(0.00, -1.24, -math.pi / 2)]       # Kieren
         ]
 
         rospy.loginfo("Waiting for move_base and services...")
