@@ -2,7 +2,7 @@ DWAPlannerROS:
   max_trans_vel: 0.10 #0.3
   min_trans_vel: 0.0 #0.01
   max_vel_x: 0.2
-  min_vel_x: -0.05
+  min_vel_x: -0.08 #Before -0.05
   max_vel_y: 0.0
   min_vel_y: 0.0
   max_rot_vel: 0.40
@@ -15,7 +15,7 @@ DWAPlannerROS:
   prune_plan: false
 
   xy_goal_tolerance: 0.05 #0.15
-  yaw_goal_tolerance: 4.1 #0.1
+  yaw_goal_tolerance: 0.15 #0.1
   trans_stopped_vel: 0.1
   rot_stopped_vel: 0.1
   sim_time: 2.0

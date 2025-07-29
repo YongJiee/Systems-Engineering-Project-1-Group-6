@@ -5,8 +5,8 @@ global_costmap:
   publish_frequency: 0.3 #before 0.5
   static_map: true 
   transform_tolerance: 0.5
-  cost_scaling_factor: 7.0
-  inflation_radius: 0.03 #0.05
+  cost_scaling_factor: 2.5 #Before 7.0
+  inflation_radius: 0.05 #0.05
 
 plugins:
   - {name: obstacles_laser,           type: "costmap_2d::ObstacleLayer"}
