@@ -17,33 +17,29 @@ from actionlib_msgs.msg import GoalStatus
 
 class RecoveryState(Enum):
     NAVIGATING = 1
-    COMPREHENSIVE_RECOVERY = 2
-    FAILED = 3
+    CLEARING_COSTMAPS = 2
+    ROTATING = 3
+    BACKING_UP = 4
+    FAILED = 5
 
 class RecoveryNavigator:
     def __init__(self):
         rospy.init_node('recovery_navigator')
-        
-        # Action client with better error handling
+
         self.client = actionlib.SimpleActionClient('move_base', MoveBaseAction)
-        
-        # Publishers and subscribers
         self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.odom_sub = rospy.Subscriber('/odom', Odometry, self.odom_callback)
         self.scan_sub = rospy.Subscriber('/scan', LaserScan, self.scan_callback)
-        
-        # Services with timeout handling
+
         self.make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
         self.clear_costmaps = rospy.ServiceProxy('/move_base/clear_costmaps', Empty)
-        
-        # State management
+
         self.current_pose = None
         self.scan_data = None
         self.state = RecoveryState.NAVIGATING
         self.pose_lock = threading.Lock()
         self.scan_lock = threading.Lock()
-        
-        # Configuration parameters (made configurable)
+
         self.max_recovery_attempts = rospy.get_param('~max_recovery_attempts', 5)
         self.position_tolerance = rospy.get_param('~position_tolerance', 0.1)
         self.orientation_tolerance = rospy.get_param('~orientation_tolerance', 0.2)
@@ -51,42 +47,27 @@ class RecoveryNavigator:
         self.min_obstacle_distance = rospy.get_param('~min_obstacle_distance', 0.3)
         self.rotation_speed = rospy.get_param('~rotation_speed', 0.3)
         self.backup_distance = rospy.get_param('~backup_distance', 0.2)
-        self.reverse_clear_distance = rospy.get_param('~reverse_clear_distance', 0.05)  # Safe for LIMO
-        
-        # Single comprehensive recovery behavior
+
         self.recovery_behaviors = [
-            self.comprehensive_recovery  # Single recovery behavior with all steps
+            self.clear_costmaps_recovery,
+            self.rotate_recovery,
+            self.backup_recovery,
+            self.aggressive_clear_recovery
         ]
-        
+
         self.plot_centers = [
-            [(0.00, -0.17, math.pi)],               # Home
-            [(-1.29, -1.51, 0.0)],              # Leon
-            [(-1.45, -0.17, 0.0)],              # Wei Qing
-            [(-1.62, 1.07, 0.0)],               # Yong Zun
-            [(-0.15, 1.26, math.pi/2)],         # Jia Cheng
-            [(1.62, 1.63, -math.pi/2)],         # YT
-            [(1.48, 0.00, math.pi / 2)],       # Yong Jie
-            [(1.50, -1.20, -math.pi / 2)],      # Gomez
-            [(0.00, -1.39, -math.pi / 2)]       # Kieren
+            [(0.00, -0.07, 0.0)],  # Home
+            [(-1.21, -1.40, math.pi)], # Leon
+            [(-1.43, -0.07, 0.0)], # Wei Qing
+            [(-1.43, 1.24, 0.0)],  # Yong Zun
+            [(-0.08, 1.28, math.pi/2)], # Jia Cheng
+            [(1.67, 1.68, -math.pi/2)], # YT
+            [(1.46, -0.07, math.pi / 2)], # Yong Jie
+            [(1.46, -1.20, -math.pi / 2)], # Gomez
+            [(0.00, -1.14, -math.pi / 2)]  # Kieren
         ]
 
         self.initialize_services()
-
-    def initialize_services(self):
-        """Initialize all services with proper error handling and timeouts"""
-        rospy.loginfo("Waiting for move_base and services...")
-        
-        try:
-            if not self.client.wait_for_server(rospy.Duration(10.0)):
-                raise RuntimeError("move_base action server not available")
-            
-            self.make_plan.wait_for_service(timeout=10.0)
-            rospy.wait_for_service('/move_base/clear_costmaps', timeout=10.0)
-            
-            rospy.loginfo("Connected to all services successfully.")
-        except Exception as e:
-            rospy.logerr("Failed to connect to services: %s", str(e))
-            raise
 
     def odom_callback(self, msg):
         with self.pose_lock:
@@ -104,13 +85,23 @@ class RecoveryNavigator:
         with self.scan_lock:
             return self.scan_data
 
+    def initialize_services(self):
+        rospy.loginfo("Waiting for move_base and services...")
+        try:
+            if not self.client.wait_for_server(rospy.Duration(10.0)):
+                raise RuntimeError("move_base action server not available")
+            self.make_plan.wait_for_service(timeout=10.0)
+            rospy.wait_for_service('/move_base/clear_costmaps', timeout=10.0)
+            rospy.loginfo("Connected to all services successfully.")
+        except Exception as e:
+            rospy.logerr("Failed to connect to services: %s", str(e))
+            raise
+
     def stop_robot(self):
-        """Safely stop the robot"""
         self.cmd_pub.publish(Twist())
         rospy.sleep(0.1)
 
     def build_goal(self, x, y, theta):
-        """Build a MoveBaseGoal with proper timestamps"""
         q = quaternion_from_euler(0, 0, theta)
         goal = MoveBaseGoal()
         goal.target_pose.header.frame_id = "map"
@@ -121,389 +112,248 @@ class RecoveryNavigator:
         return goal
 
     def check_goal_reached(self, goal):
-        """More robust goal checking with orientation"""
         current_pose = self.get_current_pose()
         if not current_pose:
             return False
-            
-        # Position check
+
         goal_x = goal.target_pose.pose.position.x
         goal_y = goal.target_pose.pose.position.y
         robot_x = current_pose.position.x
         robot_y = current_pose.position.y
         position_distance = math.hypot(goal_x - robot_x, goal_y - robot_y)
-        
-        # Orientation check
+
         goal_q = goal.target_pose.pose.orientation
         robot_q = current_pose.orientation
-        
+
         _, _, goal_yaw = euler_from_quaternion([goal_q.x, goal_q.y, goal_q.z, goal_q.w])
         _, _, robot_yaw = euler_from_quaternion([robot_q.x, robot_q.y, robot_q.z, robot_q.w])
-        
         yaw_diff = abs(goal_yaw - robot_yaw)
-        yaw_diff = min(yaw_diff, 2*math.pi - yaw_diff)  # Handle wraparound
-        
-        position_ok = position_distance < self.position_tolerance
-        orientation_ok = yaw_diff < self.orientation_tolerance
-        
-        rospy.logdebug("Goal check - Pos: %.3f/%.3f, Ori: %.3f/%.3f", 
-                      position_distance, self.position_tolerance,
-                      yaw_diff, self.orientation_tolerance)
-        
-        return position_ok and orientation_ok
+        yaw_diff = min(yaw_diff, 2*math.pi - yaw_diff)
+
+        return position_distance < self.position_tolerance and yaw_diff < self.orientation_tolerance
 
     def can_make_plan(self, goal, start_pose=None):
-        """Robust path planning check with error handling"""
         current_pose = start_pose or self.get_current_pose()
         if not current_pose:
             return False
-            
+
         req = GetPlanRequest()
         req.start.header.frame_id = "map"
         req.start.header.stamp = rospy.Time.now()
         req.start.pose = current_pose
         req.goal = goal.target_pose
         req.tolerance = 0.5
-        
+
         try:
             resp = self.make_plan(req)
-            has_plan = len(resp.plan.poses) > 1  # Need at least start and goal
-            rospy.logdebug("Plan check: %d poses", len(resp.plan.poses))
-            return has_plan
-        except rospy.ServiceException as e:
-            rospy.logwarn("Make plan service failed: %s", str(e))
+            return len(resp.plan.poses) > 1
+        except rospy.ServiceException:
             return False
 
-    def reset_move_base_client(self):
-        """Reset the move_base action client to clear any inconsistent states"""
-        try:
-            # Cancel any existing goals
-            current_state = self.client.get_state()
-            if current_state in [GoalStatus.PENDING, GoalStatus.ACTIVE, GoalStatus.PREEMPTING]:
-                rospy.loginfo("Canceling existing goal (state: %d)", current_state)
-                self.client.cancel_all_goals()
-                
-                # Wait for cancellation to complete
-                timeout = rospy.Time.now() + rospy.Duration(3.0)
-                while rospy.Time.now() < timeout and not rospy.is_shutdown():
-                    state = self.client.get_state()
-                    if state in [GoalStatus.RECALLED, GoalStatus.REJECTED, GoalStatus.PREEMPTED, 
-                                GoalStatus.ABORTED, GoalStatus.SUCCEEDED, GoalStatus.LOST]:
-                        break
-                    rospy.sleep(0.1)
-                
-                rospy.loginfo("Goal cancellation completed (final state: %d)", self.client.get_state())
-            
-        except Exception as e:
-            rospy.logwarn("Failed to reset move_base client: %s", str(e))
-
     def send_goal(self, goal):
-        """Send goal with better state monitoring and proper cleanup"""
-        # Ensure clean state before sending new goal
-        self.reset_move_base_client()
-        
-        rospy.loginfo("Sending goal to (%.2f, %.2f)", 
-                     goal.target_pose.pose.position.x,
-                     goal.target_pose.pose.position.y)
-        
         self.client.send_goal(goal)
-        
-        # Monitor goal with periodic checking
         timeout = rospy.Duration(self.goal_timeout)
-        check_rate = rospy.Rate(2)  # Check twice per second
+        check_rate = rospy.Rate(2)
         start_time = rospy.Time.now()
-        
+
         while not rospy.is_shutdown():
             if rospy.Time.now() - start_time > timeout:
-                rospy.logwarn("Goal timeout after %.1f seconds", self.goal_timeout)
                 self.client.cancel_goal()
-                rospy.sleep(0.5)  # Wait for cancellation
                 return False
-                
+
             state = self.client.get_state()
-            
+
             if state == GoalStatus.SUCCEEDED:
-                rospy.loginfo("Goal reached successfully!")
                 return True
-            elif state in [GoalStatus.ABORTED, GoalStatus.REJECTED]:
-                rospy.logwarn("Goal failed with state: %s", self.client.get_goal_status_text())
+            elif state in [GoalStatus.ABORTED, GoalStatus.REJECTED, GoalStatus.PREEMPTED]:
                 return False
-            elif state == GoalStatus.PREEMPTED:
-                rospy.logwarn("Goal was preempted")
-                return False
-                
-            # Check if we're actually close enough despite move_base state
+
             if self.check_goal_reached(goal):
-                rospy.loginfo("Goal reached based on position check!")
                 self.client.cancel_goal()
-                rospy.sleep(0.3)  # Brief wait for clean cancellation
                 return True
-                
+
             check_rate.sleep()
-            
+
         return False
 
     def analyze_surroundings(self):
-        """Analyze laser scan for better recovery decisions"""
         scan_data = self.get_scan_data()
         if not scan_data or not scan_data.ranges:
-            return {'front_clear': False, 'sides_clear': False, 'can_rotate': False, 'can_reverse': False}
-        
+            return {'front_clear': False, 'sides_clear': False, 'can_rotate': False}
+
         ranges = scan_data.ranges
         angle_min = scan_data.angle_min
         angle_increment = scan_data.angle_increment
-        
-        # Analyze different sectors
-        front_sector = []  # ±30 degrees
-        left_sector = []   # 30-150 degrees  
-        right_sector = []  # -150 to -30 degrees
-        rear_sector = []   # ±150-180 degrees (for reverse safety)
-        
+
+        front = []
+        left = []
+        right = []
+
         for i, r in enumerate(ranges):
             if math.isinf(r) or math.isnan(r) or r <= 0:
                 continue
-                
+
             angle = angle_min + i * angle_increment
-            
-            if -math.pi/6 <= angle <= math.pi/6:  # Front ±30°
-                front_sector.append(r)
-            elif math.pi/6 < angle <= 5*math.pi/6:  # Left side
-                left_sector.append(r)
-            elif -5*math.pi/6 <= angle < -math.pi/6:  # Right side
-                right_sector.append(r)
-            elif abs(angle) >= 5*math.pi/6:  # Rear ±30°
-                rear_sector.append(r)
-        
+            if -math.pi/6 <= angle <= math.pi/6:
+                front.append(r)
+            elif math.pi/6 < angle <= 5*math.pi/6:
+                left.append(r)
+            elif -5*math.pi/6 <= angle < -math.pi/6:
+                right.append(r)
+
         def sector_clear(sector, min_dist):
-            if not sector:
-                return False
-            return min(sector) > min_dist and len([r for r in sector if r > min_dist]) > len(sector) * 0.7
-        
+            return sector and min(sector) > min_dist and sum(r > min_dist for r in sector) > 0.7 * len(sector)
+
         return {
-            'front_clear': sector_clear(front_sector, self.min_obstacle_distance),
-            'left_clear': sector_clear(left_sector, self.min_obstacle_distance * 0.8),
-            'right_clear': sector_clear(right_sector, self.min_obstacle_distance * 0.8),
-            'can_rotate': sector_clear(left_sector + right_sector, self.min_obstacle_distance * 0.6),
-            'can_reverse': sector_clear(rear_sector, self.min_obstacle_distance)
+            'front_clear': sector_clear(front, self.min_obstacle_distance),
+            'left_clear': sector_clear(left, self.min_obstacle_distance * 0.8),
+            'right_clear': sector_clear(right, self.min_obstacle_distance * 0.8),
+            'can_rotate': sector_clear(left + right, self.min_obstacle_distance * 0.6)
         }
 
-    def comprehensive_recovery(self, goal):
-        """Single comprehensive recovery behavior with multiple steps including reverse"""
-        rospy.loginfo("Starting comprehensive recovery behavior...")
-        self.state = RecoveryState.COMPREHENSIVE_RECOVERY
-        
-        # Ensure clean action client state
-        self.reset_move_base_client()
-        
-        # Step 1: Clear costmaps first
-        rospy.loginfo("Step 1: Initial costmap clearing...")
-        try:
-            self.clear_costmaps()
-            rospy.sleep(0.5)
-            # Check if this simple step solved the problem
-            if self.can_make_plan(goal):
-                rospy.loginfo("Path found after initial costmap clear!")
-                return True
-        except rospy.ServiceException as e:
-            rospy.logwarn("Initial costmap clear failed: %s", str(e))
-        
-        # Step 2: Small reverse movement (safe for LIMO)
-        rospy.loginfo("Step 2: Small reverse movement (5cm)...")
-        twist = Twist()
-        twist.linear.x = -0.05  # 5cm/s reverse
-        
-        # Reverse for 1 second = 5cm
-        rate = rospy.Rate(10)
-        for _ in range(10):  # 1 second at 10Hz
-            self.cmd_pub.publish(twist)
-            rate.sleep()
-        
-        self.stop_robot()
-        rospy.sleep(0.3)
-        
-        # Step 3: Clear costmaps after reverse
-        rospy.loginfo("Step 3: Clearing costmaps after reverse...")
-        try:
-            self.clear_costmaps()
-            rospy.sleep(0.5)
-            if self.can_make_plan(goal):
-                rospy.loginfo("Path found after reverse and clear!")
-                return True
-        except rospy.ServiceException as e:
-            rospy.logwarn("Costmap clear after reverse failed: %s", str(e))
-        
-        # Step 4: Try rotation if we still don't have a path
+    def clear_costmaps_recovery(self, goal):
+        rospy.loginfo("Recovery: Backing up before clearing costmaps...")
+        self.state = RecoveryState.BACKING_UP
+
         surroundings = self.analyze_surroundings()
-        if surroundings['can_rotate']:
-            rospy.loginfo("Step 4: Trying rotation recovery...")
-            
-            # Try 90-degree rotations in both directions
-            rotation_attempts = [
-                (1, math.pi/2),    # 90° left
-                (-1, math.pi/2),   # 90° right
-                (1, math.pi),      # 180° left if needed
-            ]
-            
-            for direction, angle in rotation_attempts:
-                if self.rotate_and_check(goal, direction, angle):
-                    rospy.loginfo("Path found after rotation!")
-                    return True
+        if not surroundings['front_clear'] and not surroundings['left_clear'] and not surroundings['right_clear']:
+            rospy.logwarn("Completely surrounded, skipping backup before costmap clear")
         else:
-            rospy.loginfo("Step 4: Skipping rotation - not enough space")
-        
-        # Step 5: Final aggressive costmap clearing
-        rospy.loginfo("Step 5: Final aggressive costmap clearing...")
-        for i in range(3):
-            try:
-                self.clear_costmaps()
-                rospy.sleep(0.3)
-            except:
-                pass
-        
-        # Small repositioning movement
-        twist = Twist()
-        twist.linear.x = 0.03  # Very small forward nudge
-        twist.angular.z = 0.1  # Small rotation
-        
-        for _ in range(8):  # Brief movement
-            self.cmd_pub.publish(twist)
-            rospy.sleep(0.1)
-        
-        self.stop_robot()
-        rospy.sleep(0.5)
-        
-        # Final check
-        if self.can_make_plan(goal):
-            rospy.loginfo("Path found after comprehensive recovery!")
+            twist = Twist()
+            twist.linear.x = -0.01
+            backup_duration = self.backup_distance / 0.1
+            rate = rospy.Rate(10)
+            for _ in range(int(backup_duration * 10)):
+                self.cmd_pub.publish(twist)
+                rate.sleep()
+            self.stop_robot()
+            rospy.sleep(0.5)
+
+        rospy.loginfo("Recovery: Clearing costmaps...")
+        self.state = RecoveryState.CLEARING_COSTMAPS
+        try:
+            self.clear_costmaps()
+            rospy.sleep(1.0)
             return True
-        
-        rospy.logwarn("Comprehensive recovery completed but no path found")
+        except rospy.ServiceException as e:
+            rospy.logwarn("Failed to clear costmaps: %s", str(e))
+            return False
+
+    def rotate_recovery(self, goal):
+        rospy.loginfo("Recovery: Rotating to find clear path...")
+        self.state = RecoveryState.ROTATING
+        surroundings = self.analyze_surroundings()
+        if not surroundings['can_rotate']:
+            return False
+
+        for direction, angle in [(1, math.pi/2), (-1, math.pi/2), (1, math.pi), (-1, math.pi)]:
+            if self.rotate_and_check(goal, direction, angle):
+                return True
+
         return False
 
     def rotate_and_check(self, goal, direction, target_angle):
-        """Rotate by specified angle and check for valid path"""
         current_pose = self.get_current_pose()
         if not current_pose:
             return False
-            
-        # Get initial orientation
+
         q = current_pose.orientation
         _, _, initial_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
         target_yaw = initial_yaw + direction * target_angle
-        
+
         twist = Twist()
         twist.angular.z = direction * self.rotation_speed
-        
         rate = rospy.Rate(10)
         timeout = rospy.Time.now() + rospy.Duration(target_angle / self.rotation_speed + 2.0)
-        
+
         while rospy.Time.now() < timeout and not rospy.is_shutdown():
-            current_pose = self.get_current_pose()
-            if not current_pose:
-                break
-                
-            q = current_pose.orientation
-            _, _, current_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
-            
-            yaw_diff = abs(current_yaw - target_yaw)
-            yaw_diff = min(yaw_diff, 2*math.pi - yaw_diff)
-            
-            if yaw_diff < 0.1:  # Close enough to target
-                break
-                
             self.cmd_pub.publish(twist)
             rate.sleep()
-        
+
         self.stop_robot()
-        rospy.sleep(0.5)  # Let systems stabilize
-        
-        # Check if we can now make a plan
-        if self.can_make_plan(goal):
-            rospy.loginfo("Found valid path after %.1f° rotation", math.degrees(target_angle))
-            return True
-            
-        return False
+        rospy.sleep(0.5)
+
+        return self.can_make_plan(goal)
+
+    def backup_recovery(self, goal):
+        rospy.loginfo("Recovery: Backing up...")
+        self.state = RecoveryState.BACKING_UP
+        surroundings = self.analyze_surroundings()
+        if not surroundings['front_clear'] and not surroundings['left_clear'] and not surroundings['right_clear']:
+            return False
+
+        twist = Twist()
+        twist.linear.x = -0.1
+        duration = self.backup_distance / 0.1
+        rate = rospy.Rate(10)
+        for _ in range(int(duration * 10)):
+            self.cmd_pub.publish(twist)
+            rate.sleep()
+
+        self.stop_robot()
+        rospy.sleep(0.5)
+        return self.can_make_plan(goal)
+
+    def aggressive_clear_recovery(self, goal):
+        for _ in range(3):
+            try:
+                self.clear_costmaps()
+                rospy.sleep(0.5)
+            except:
+                pass
+
+        twist = Twist()
+        twist.linear.x = 0.05
+        twist.angular.z = 0.1
+        for _ in range(10):
+            self.cmd_pub.publish(twist)
+            rospy.sleep(0.1)
+
+        self.stop_robot()
+        rospy.sleep(1.0)
+        return self.can_make_plan(goal)
 
     def navigate_to_goal(self, plot_name, goal):
-        """Navigate to goal with systematic recovery"""
-        rospy.loginfo("Navigating to plot %s at (%.2f, %.2f)", 
-                     plot_name, goal.target_pose.pose.position.x, goal.target_pose.pose.position.y)
-        
-        # Try direct navigation first
+        rospy.loginfo("Navigating to plot %s", plot_name)
         if self.can_make_plan(goal):
             if self.send_goal(goal):
-                rospy.loginfo("Successfully reached plot %s", plot_name)
                 return True
-        
-        # If direct navigation fails, try recovery behaviors
+
         for attempt in range(self.max_recovery_attempts):
-            rospy.loginfo("Recovery attempt %d/%d for plot %s", 
-                         attempt + 1, self.max_recovery_attempts, plot_name)
-            
-            # Try each recovery behavior
-            recovery_success = False
-            for i, recovery_behavior in enumerate(self.recovery_behaviors):
-                rospy.loginfo("Trying comprehensive recovery behavior")
-                
+            for recovery_behavior in self.recovery_behaviors:
                 if recovery_behavior(goal):
-                    # Recovery behavior succeeded, try navigation again
                     if self.can_make_plan(goal):
                         if self.send_goal(goal):
-                            rospy.loginfo("Reached plot %s after recovery", plot_name)
                             return True
-                    recovery_success = True
                     break
-                
-                rospy.sleep(0.5)  # Brief pause between recovery attempts
-            
-            if not recovery_success:
-                rospy.logwarn("Comprehensive recovery failed for attempt %d", attempt + 1)
-            
-            rospy.sleep(1.0)  # Pause between recovery attempts
-        
+            rospy.sleep(1.0)
+
         self.state = RecoveryState.FAILED
-        rospy.logerr("Failed to reach plot %s after %d recovery attempts", 
-                    plot_name, self.max_recovery_attempts)
         return False
 
     def run(self):
-        """Main execution loop"""
-        route = rospy.get_param("~options", [0])  # Default to home
+        route = rospy.get_param("~options", [0])
         rospy.loginfo("Executing route: %s", route)
-        
-        success_count = 0
-        total_plots = len(route)
-        
+
+        success = 0
         for plot_idx in route:
             if not (0 <= plot_idx < len(self.plot_centers)):
-                rospy.logwarn("Invalid plot index: %d, skipping...", plot_idx)
                 continue
-            
             goal_pose = self.plot_centers[plot_idx][0]
             goal = self.build_goal(*goal_pose)
-            
             if self.navigate_to_goal(str(plot_idx), goal):
-                success_count += 1
-                rospy.sleep(2.0)  # Pause at each successful plot
-            else:
-                # Ask user if they want to continue or abort
-                rospy.logwarn("Failed to reach plot %d. Continuing to next plot...", plot_idx)
-                continue
-        
-        rospy.loginfo("Navigation completed: %d/%d plots reached successfully", 
-                     success_count, total_plots)
-        
-        if success_count == total_plots:
-            rospy.loginfo("All plots reached successfully!")
-        else:
-            rospy.logwarn("Some plots were not reached. Check logs for details.")
+                success += 1
+                rospy.sleep(2.0)
+
+        rospy.loginfo("Navigation complete: %d/%d plots reached", success, len(route))
 
 if __name__ == '__main__':
     try:
         navigator = RecoveryNavigator()
         navigator.run()
     except rospy.ROSInterruptException:
-        rospy.loginfo("Navigation interrupted by user")
+        pass
     except Exception as e:
         rospy.logerr("Navigation failed with error: %s", str(e))
         raise
+
