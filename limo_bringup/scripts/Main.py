@@ -17,10 +17,8 @@ from actionlib_msgs.msg import GoalStatus
 
 class RecoveryState(Enum):
     NAVIGATING = 1
-    CLEARING_COSTMAPS = 2
-    ROTATING = 3
-    BACKING_UP = 4
-    FAILED = 5
+    COMPREHENSIVE_RECOVERY = 2
+    FAILED = 3
 
 class RecoveryNavigator:
     def __init__(self):
@@ -53,26 +51,23 @@ class RecoveryNavigator:
         self.min_obstacle_distance = rospy.get_param('~min_obstacle_distance', 0.3)
         self.rotation_speed = rospy.get_param('~rotation_speed', 0.3)
         self.backup_distance = rospy.get_param('~backup_distance', 0.2)
+        self.reverse_clear_distance = rospy.get_param('~reverse_clear_distance', 0.05)  # Safe for LIMO
         
-        # Recovery behavior configuration - LIMO-optimized order
+        # Single comprehensive recovery behavior
         self.recovery_behaviors = [
-            self.simple_reverse_recovery,      # Most effective for LIMO - just back up
-            self.rotate_recovery,              # Rotate to find new path  
-            self.clear_costmaps_recovery,      # Clear stale costmap data
-            self.wiggle_recovery,              # Small movements to escape
-            self.aggressive_clear_recovery     # Last resort
+            self.comprehensive_recovery  # Single recovery behavior with all steps
         ]
         
         self.plot_centers = [
-            [(0.00, -0.07, 0.0)],               # Home
-            [(-1.30, -1.40, 0.0)],              # Leon
-            [(-1.43, -0.07, 0.0)],              # Wei Qing
-            [(-1.43, 1.24, 0.0)],               # Yong Zun
-            [(-0.08, 1.28, math.pi/2)],         # Jia Cheng
-            [(1.67, 1.68, -math.pi/2)],         # YT
-            [(1.46, -0.07, math.pi / 2)],       # Yong Jie
-            [(1.46, -1.20, -math.pi / 2)],      # Gomez
-            [(0.00, -1.24, -math.pi / 2)]       # Kieren
+            [(0.00, -0.17, math.pi)],               # Home
+            [(-1.29, -1.51, 0.0)],              # Leon
+            [(-1.45, -0.17, 0.0)],              # Wei Qing
+            [(-1.62, 1.07, 0.0)],               # Yong Zun
+            [(-0.15, 1.26, math.pi/2)],         # Jia Cheng
+            [(1.62, 1.63, -math.pi/2)],         # YT
+            [(1.48, 0.00, math.pi / 2)],       # Yong Jie
+            [(1.50, -1.20, -math.pi / 2)],      # Gomez
+            [(0.00, -1.39, -math.pi / 2)]       # Kieren
         ]
 
         self.initialize_services()
@@ -252,7 +247,7 @@ class RecoveryNavigator:
         """Analyze laser scan for better recovery decisions"""
         scan_data = self.get_scan_data()
         if not scan_data or not scan_data.ranges:
-            return {'front_clear': False, 'sides_clear': False, 'can_rotate': False}
+            return {'front_clear': False, 'sides_clear': False, 'can_rotate': False, 'can_reverse': False}
         
         ranges = scan_data.ranges
         angle_min = scan_data.angle_min
@@ -262,6 +257,7 @@ class RecoveryNavigator:
         front_sector = []  # ±30 degrees
         left_sector = []   # 30-150 degrees  
         right_sector = []  # -150 to -30 degrees
+        rear_sector = []   # ±150-180 degrees (for reverse safety)
         
         for i, r in enumerate(ranges):
             if math.isinf(r) or math.isnan(r) or r <= 0:
@@ -275,6 +271,8 @@ class RecoveryNavigator:
                 left_sector.append(r)
             elif -5*math.pi/6 <= angle < -math.pi/6:  # Right side
                 right_sector.append(r)
+            elif abs(angle) >= 5*math.pi/6:  # Rear ±30°
+                rear_sector.append(r)
         
         def sector_clear(sector, min_dist):
             if not sector:
@@ -285,53 +283,101 @@ class RecoveryNavigator:
             'front_clear': sector_clear(front_sector, self.min_obstacle_distance),
             'left_clear': sector_clear(left_sector, self.min_obstacle_distance * 0.8),
             'right_clear': sector_clear(right_sector, self.min_obstacle_distance * 0.8),
-            'can_rotate': sector_clear(left_sector + right_sector, self.min_obstacle_distance * 0.6)
+            'can_rotate': sector_clear(left_sector + right_sector, self.min_obstacle_distance * 0.6),
+            'can_reverse': sector_clear(rear_sector, self.min_obstacle_distance)
         }
 
-    def clear_costmaps_recovery(self, goal):
-        """Recovery behavior: Clear costmaps"""
-        rospy.loginfo("Recovery: Clearing costmaps...")
-        self.state = RecoveryState.CLEARING_COSTMAPS
+    def comprehensive_recovery(self, goal):
+        """Single comprehensive recovery behavior with multiple steps including reverse"""
+        rospy.loginfo("Starting comprehensive recovery behavior...")
+        self.state = RecoveryState.COMPREHENSIVE_RECOVERY
         
-        # Ensure clean action client state first
+        # Ensure clean action client state
         self.reset_move_base_client()
         
+        # Step 1: Clear costmaps first
+        rospy.loginfo("Step 1: Initial costmap clearing...")
         try:
             self.clear_costmaps()
-            rospy.sleep(1.0)  # Wait for costmap refresh
-            rospy.loginfo("Costmaps cleared successfully")
-            return True
-        except rospy.ServiceException as e:
-            rospy.logwarn("Failed to clear costmaps: %s", str(e))
-            return False
-
-    def rotate_recovery(self, goal):
-        """Recovery behavior: Intelligent rotation"""
-        rospy.loginfo("Recovery: Rotating to find clear path...")
-        self.state = RecoveryState.ROTATING
-        
-        # Ensure clean action client state before rotation
-        self.reset_move_base_client()
-        
-        surroundings = self.analyze_surroundings()
-        if not surroundings['can_rotate']:
-            rospy.logwarn("Not enough space to rotate safely")
-            return False
-        
-        # Try different rotation amounts and directions
-        rotation_attempts = [
-            (1, math.pi/3),    # 60° left
-            (-1, math.pi/3),   # 60° right  
-            (1, math.pi/2),    # 90° left
-            (-1, math.pi/2),   # 90° right
-            (1, math.pi),      # 180° left
-        ]
-        
-        for direction, angle in rotation_attempts:
-            if self.rotate_and_check(goal, direction, angle):
+            rospy.sleep(0.5)
+            # Check if this simple step solved the problem
+            if self.can_make_plan(goal):
+                rospy.loginfo("Path found after initial costmap clear!")
                 return True
-                
-        rospy.logwarn("Rotation recovery failed to find valid path")
+        except rospy.ServiceException as e:
+            rospy.logwarn("Initial costmap clear failed: %s", str(e))
+        
+        # Step 2: Small reverse movement (safe for LIMO)
+        rospy.loginfo("Step 2: Small reverse movement (5cm)...")
+        twist = Twist()
+        twist.linear.x = -0.05  # 5cm/s reverse
+        
+        # Reverse for 1 second = 5cm
+        rate = rospy.Rate(10)
+        for _ in range(10):  # 1 second at 10Hz
+            self.cmd_pub.publish(twist)
+            rate.sleep()
+        
+        self.stop_robot()
+        rospy.sleep(0.3)
+        
+        # Step 3: Clear costmaps after reverse
+        rospy.loginfo("Step 3: Clearing costmaps after reverse...")
+        try:
+            self.clear_costmaps()
+            rospy.sleep(0.5)
+            if self.can_make_plan(goal):
+                rospy.loginfo("Path found after reverse and clear!")
+                return True
+        except rospy.ServiceException as e:
+            rospy.logwarn("Costmap clear after reverse failed: %s", str(e))
+        
+        # Step 4: Try rotation if we still don't have a path
+        surroundings = self.analyze_surroundings()
+        if surroundings['can_rotate']:
+            rospy.loginfo("Step 4: Trying rotation recovery...")
+            
+            # Try 90-degree rotations in both directions
+            rotation_attempts = [
+                (1, math.pi/2),    # 90° left
+                (-1, math.pi/2),   # 90° right
+                (1, math.pi),      # 180° left if needed
+            ]
+            
+            for direction, angle in rotation_attempts:
+                if self.rotate_and_check(goal, direction, angle):
+                    rospy.loginfo("Path found after rotation!")
+                    return True
+        else:
+            rospy.loginfo("Step 4: Skipping rotation - not enough space")
+        
+        # Step 5: Final aggressive costmap clearing
+        rospy.loginfo("Step 5: Final aggressive costmap clearing...")
+        for i in range(3):
+            try:
+                self.clear_costmaps()
+                rospy.sleep(0.3)
+            except:
+                pass
+        
+        # Small repositioning movement
+        twist = Twist()
+        twist.linear.x = 0.03  # Very small forward nudge
+        twist.angular.z = 0.1  # Small rotation
+        
+        for _ in range(8):  # Brief movement
+            self.cmd_pub.publish(twist)
+            rospy.sleep(0.1)
+        
+        self.stop_robot()
+        rospy.sleep(0.5)
+        
+        # Final check
+        if self.can_make_plan(goal):
+            rospy.loginfo("Path found after comprehensive recovery!")
+            return True
+        
+        rospy.logwarn("Comprehensive recovery completed but no path found")
         return False
 
     def rotate_and_check(self, goal, direction, target_angle):
@@ -378,140 +424,6 @@ class RecoveryNavigator:
             
         return False
 
-    def wait_and_retry_recovery(self, goal):
-        """Recovery behavior: Simple wait - sometimes the environment changes"""
-        rospy.loginfo("Recovery: Waiting for environment to clear...")
-        self.reset_move_base_client()
-        
-        # Just wait - maybe a person will move, door will open, etc.
-        rospy.sleep(3.0)
-        
-        return self.can_make_plan(goal)
-
-    def simple_reverse_recovery(self, goal):
-        """Recovery behavior: Simple reverse for LIMO robot"""
-        rospy.loginfo("Recovery: Simple reverse maneuver...")
-        self.state = RecoveryState.BACKING_UP
-        self.reset_move_base_client()
-        
-        # LIMO-specific parameters
-        reverse_distance = 0.03  # 15cm - small but effective for LIMO
-        reverse_speed = 0.06     # Slow and controlled
-        
-        # Basic safety check - ensure we're not completely surrounded
-        scan_data = self.get_scan_data()
-        if scan_data and scan_data.ranges:
-            # Quick check: is there reasonable space behind us?
-            ranges = scan_data.ranges
-            rear_sector = ranges[-30:] + ranges[:30]  # Rough rear 60° sector
-            valid_ranges = [r for r in rear_sector if not (math.isinf(r) or math.isnan(r)) and r > 0]
-            
-            if valid_ranges and min(valid_ranges) < 0.25:
-                rospy.logwarn("Rear appears blocked (%.2f m), skipping reverse", min(valid_ranges))
-                return False
-        
-        # Simple timed reverse
-        twist = Twist()
-        twist.linear.x = -reverse_speed
-        
-        reverse_time = reverse_distance / reverse_speed  # About 2.5 seconds
-        
-        rospy.loginfo("LIMO reversing %.2f m at %.2f m/s for %.1f seconds", 
-                     reverse_distance, reverse_speed, reverse_time)
-        
-        # Execute reverse
-        start_time = rospy.Time.now()
-        rate = rospy.Rate(10)
-        
-        while (rospy.Time.now() - start_time).to_sec() < reverse_time and not rospy.is_shutdown():
-            self.cmd_pub.publish(twist)
-            rate.sleep()
-        
-        # Stop and settle
-        self.stop_robot()
-        rospy.sleep(0.3)
-        
-        # Check if this opened up a path
-        success = self.can_make_plan(goal)
-        if success:
-            rospy.loginfo("Simple reverse successful - path now clear")
-        else:
-            rospy.loginfo("Reverse completed but path still blocked")
-            
-        return success
-
-    def wiggle_recovery(self, goal):
-        """Recovery behavior: Small oscillating movements to escape local minimum"""
-        rospy.loginfo("Recovery: Wiggling to escape local minimum...")
-        self.reset_move_base_client()
-        
-        surroundings = self.analyze_surroundings()
-        if not surroundings['can_rotate']:
-            rospy.logwarn("Not enough space to wiggle safely")
-            return False
-        
-        # Alternate small rotations and translations
-        movements = [
-            {'angular': 0.2, 'duration': 1.0},   # Small left turn
-            {'linear': 0.05, 'duration': 0.5},   # Tiny forward
-            {'angular': -0.4, 'duration': 1.0},  # Small right turn  
-            {'linear': 0.05, 'duration': 0.5},   # Tiny forward
-            {'angular': 0.2, 'duration': 1.0},   # Back to roughly original heading
-        ]
-        
-        rate = rospy.Rate(10)
-        
-        for movement in movements:
-            twist = Twist()
-            if 'angular' in movement:
-                twist.angular.z = movement['angular']
-            if 'linear' in movement:
-                twist.linear.x = movement['linear']
-            
-            start_time = rospy.Time.now()
-            while (rospy.Time.now() - start_time).to_sec() < movement['duration']:
-                self.cmd_pub.publish(twist)
-                rate.sleep()
-            
-            # Check if path is available after each movement
-            self.stop_robot()
-            rospy.sleep(0.2)
-            
-            if self.can_make_plan(goal):
-                rospy.loginfo("Wiggle recovery found path after movement")
-                return True
-        
-        return self.can_make_plan(goal)
-
-    def aggressive_clear_recovery(self, goal):
-        """Recovery behavior: Aggressive costmap clearing with small movement"""
-        rospy.loginfo("Recovery: Aggressive clearing with repositioning...")
-        
-        # Ensure clean action client state
-        self.reset_move_base_client()
-        
-        # Clear costmaps multiple times
-        for _ in range(3):
-            try:
-                self.clear_costmaps()
-                rospy.sleep(0.5)
-            except:
-                pass
-        
-        # Small random movement to change robot position slightly
-        twist = Twist()
-        twist.linear.x = 0.05
-        twist.angular.z = 0.1
-        
-        for _ in range(10):
-            self.cmd_pub.publish(twist)
-            rospy.sleep(0.1)
-        
-        self.stop_robot()
-        rospy.sleep(1.0)
-        
-        return self.can_make_plan(goal)
-
     def navigate_to_goal(self, plot_name, goal):
         """Navigate to goal with systematic recovery"""
         rospy.loginfo("Navigating to plot %s at (%.2f, %.2f)", 
@@ -531,7 +443,7 @@ class RecoveryNavigator:
             # Try each recovery behavior
             recovery_success = False
             for i, recovery_behavior in enumerate(self.recovery_behaviors):
-                rospy.loginfo("Trying recovery behavior %d", i + 1)
+                rospy.loginfo("Trying comprehensive recovery behavior")
                 
                 if recovery_behavior(goal):
                     # Recovery behavior succeeded, try navigation again
@@ -545,7 +457,7 @@ class RecoveryNavigator:
                 rospy.sleep(0.5)  # Brief pause between recovery attempts
             
             if not recovery_success:
-                rospy.logwarn("All recovery behaviors failed for attempt %d", attempt + 1)
+                rospy.logwarn("Comprehensive recovery failed for attempt %d", attempt + 1)
             
             rospy.sleep(1.0)  # Pause between recovery attempts
         
