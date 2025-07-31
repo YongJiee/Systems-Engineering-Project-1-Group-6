@@ -21,6 +21,7 @@ class RecoveryState(Enum):
     ROTATING = 3
     BACKING_UP = 4
     FAILED = 5
+    RETURNING_HOME = 6
 
 class RecoveryNavigator:
     def __init__(self):
@@ -40,13 +41,18 @@ class RecoveryNavigator:
         self.pose_lock = threading.Lock()
         self.scan_lock = threading.Lock()
 
-        self.max_recovery_attempts = rospy.get_param('~max_recovery_attempts', 5)
-        self.position_tolerance = rospy.get_param('~position_tolerance', 0.1)
+        self.max_recovery_attempts = rospy.get_param('~max_recovery_attempts', 4)
+        self.position_tolerance = rospy.get_param('~position_tolerance', 0.2)
         self.orientation_tolerance = rospy.get_param('~orientation_tolerance', 0.2)
         self.goal_timeout = rospy.get_param('~goal_timeout', 60.0)
-        self.min_obstacle_distance = rospy.get_param('~min_obstacle_distance', 0.3)
+        self.min_obstacle_distance = rospy.get_param('~min_obstacle_distance', 0.2)
         self.rotation_speed = rospy.get_param('~rotation_speed', 0.3)
         self.backup_distance = rospy.get_param('~backup_distance', 0.2)
+        
+        # New parameters for retry logic
+        self.max_goal_attempts = rospy.get_param('~max_goal_attempts', 2)
+        self.max_home_retry_attempts = rospy.get_param('~max_home_retry_attempts', 999)
+        self.ignore_orientation = rospy.get_param('~ignore_orientation', True)
 
         self.recovery_behaviors = [
             self.clear_costmaps_recovery,
@@ -56,17 +62,18 @@ class RecoveryNavigator:
         ]
 
         self.plot_centers = [
-            [(0.00, -0.07, 0.0)],  # Home
-            [(-1.21, -1.40, math.pi)], # Leon
-            [(-1.43, -0.07, 0.0)], # Wei Qing
-            [(-1.43, 1.24, 0.0)],  # Yong Zun
-            [(-0.08, 1.28, math.pi/2)], # Jia Cheng
-            [(1.67, 1.68, -math.pi/2)], # YT
-            [(1.46, -0.07, math.pi / 2)], # Yong Jie
-            [(1.46, -1.20, -math.pi / 2)], # Gomez
-            [(0.00, -1.14, -math.pi / 2)]  # Kieren
+            [(0.00, -0.07, 0.0)],  # Home - Index 0
+            [(-1.21, -1.50, 0.0)], # Leon
+            [(-1.32, -0.15, 0.0)], # Wei Qing
+            [(-1.48, 1.07, 0.0)],  # Yong Zun
+            [(-0.15, 1.21, 0.0)], # Jia Cheng
+            [(1.69, 1.62, 0.0)], # YT
+            [(1.46, -0.07, 0.0)], # Yong Jie
+            [(1.46, -1.20, 0.0)], # Gomez
+            [(0.00, -1.18, 0.0)]  # Kieren
         ]
 
+        self.home_index = 0  # Index of home position
         self.initialize_services()
 
     def odom_callback(self, msg):
@@ -101,7 +108,7 @@ class RecoveryNavigator:
         self.cmd_pub.publish(Twist())
         rospy.sleep(0.1)
 
-    def build_goal(self, x, y, theta):
+    def build_goal(self, x, y, theta=0.0):
         q = quaternion_from_euler(0, 0, theta)
         goal = MoveBaseGoal()
         goal.target_pose.header.frame_id = "map"
@@ -122,15 +129,20 @@ class RecoveryNavigator:
         robot_y = current_pose.position.y
         position_distance = math.hypot(goal_x - robot_x, goal_y - robot_y)
 
-        goal_q = goal.target_pose.pose.orientation
-        robot_q = current_pose.orientation
+        # Check if we should ignore orientation
+        if self.ignore_orientation:
+            return position_distance < self.position_tolerance
+        else:
+            # Original orientation check
+            goal_q = goal.target_pose.pose.orientation
+            robot_q = current_pose.orientation
 
-        _, _, goal_yaw = euler_from_quaternion([goal_q.x, goal_q.y, goal_q.z, goal_q.w])
-        _, _, robot_yaw = euler_from_quaternion([robot_q.x, robot_q.y, robot_q.z, robot_q.w])
-        yaw_diff = abs(goal_yaw - robot_yaw)
-        yaw_diff = min(yaw_diff, 2*math.pi - yaw_diff)
+            _, _, goal_yaw = euler_from_quaternion([goal_q.x, goal_q.y, goal_q.z, goal_q.w])
+            _, _, robot_yaw = euler_from_quaternion([robot_q.x, robot_q.y, robot_q.z, robot_q.w])
+            yaw_diff = abs(goal_yaw - robot_yaw)
+            yaw_diff = min(yaw_diff, 2*math.pi - yaw_diff)
 
-        return position_distance < self.position_tolerance and yaw_diff < self.orientation_tolerance
+            return position_distance < self.position_tolerance and yaw_diff < self.orientation_tolerance
 
     def can_make_plan(self, goal, start_pose=None):
         current_pose = start_pose or self.get_current_pose()
@@ -313,13 +325,95 @@ class RecoveryNavigator:
         rospy.sleep(1.0)
         return self.can_make_plan(goal)
 
+    def return_to_home(self):
+        """Return to home position with recovery attempts"""
+        rospy.loginfo("Returning to home position...")
+        self.state = RecoveryState.RETURNING_HOME
+        
+        home_pose = self.plot_centers[self.home_index][0]
+        home_goal = self.build_goal(*home_pose)
+        
+        # Try to return home with recovery behaviors
+        if self.can_make_plan(home_goal):
+            if self.send_goal(home_goal):
+                rospy.loginfo("Successfully returned to home")
+                return True
+
+        # If direct navigation fails, try recovery behaviors
+        for attempt in range(self.max_recovery_attempts):
+            rospy.loginfo("Home return recovery attempt %d/%d", attempt + 1, self.max_recovery_attempts)
+            for recovery_behavior in self.recovery_behaviors:
+                if recovery_behavior(home_goal):
+                    if self.can_make_plan(home_goal):
+                        if self.send_goal(home_goal):
+                            rospy.loginfo("Successfully returned to home after recovery")
+                            return True
+                    break
+            rospy.sleep(1.0)
+
+        rospy.logwarn("Failed to return to home after all recovery attempts")
+        return False
+
+    def navigate_to_goal_with_retry(self, plot_name, goal):
+        """Navigate to goal with retry logic including home return"""
+        rospy.loginfo("Navigating to plot %s with retry logic", plot_name)
+        
+        # First attempt: try to reach goal directly (up to max_goal_attempts times)
+        for attempt in range(self.max_goal_attempts):
+            rospy.loginfo("Direct navigation attempt %d/%d to plot %s", 
+                         attempt + 1, self.max_goal_attempts, plot_name)
+            
+            if self.navigate_to_goal(plot_name, goal):
+                return True
+            
+            rospy.logwarn("Failed direct navigation attempt %d/%d to plot %s", 
+                         attempt + 1, self.max_goal_attempts, plot_name)
+            rospy.sleep(1.0)
+        
+        rospy.logwarn("Failed to reach plot %s after %d direct attempts. Returning to home...", 
+                     plot_name, self.max_goal_attempts)
+        
+        # Return to home
+        if not self.return_to_home():
+            rospy.logerr("Failed to return to home. Skipping plot %s", plot_name)
+            return False
+        
+        rospy.sleep(2.0)  # Wait a bit at home
+        
+        # Second attempt: try from home (up to max_home_retry_attempts times)
+        for attempt in range(self.max_home_retry_attempts):
+            rospy.loginfo("Home-based navigation attempt %d/%d to plot %s", 
+                         attempt + 1, self.max_home_retry_attempts, plot_name)
+            
+            if self.navigate_to_goal(plot_name, goal):
+                return True
+            
+            rospy.logwarn("Failed home-based navigation attempt %d/%d to plot %s", 
+                         attempt + 1, self.max_home_retry_attempts, plot_name)
+            
+            # Return to home between attempts (except for the last attempt)
+            if attempt < self.max_home_retry_attempts - 1:
+                rospy.loginfo("Returning to home before next attempt...")
+                if not self.return_to_home():
+                    rospy.logerr("Failed to return to home during retry sequence")
+                    break
+                rospy.sleep(1.0)
+        
+        rospy.logerr("Failed to reach plot %s after all retry attempts. Moving to next plot.", plot_name)
+        return False
+
     def navigate_to_goal(self, plot_name, goal):
+        """Original navigation method with recovery behaviors"""
         rospy.loginfo("Navigating to plot %s", plot_name)
+        self.state = RecoveryState.NAVIGATING
+        
         if self.can_make_plan(goal):
             if self.send_goal(goal):
                 return True
 
         for attempt in range(self.max_recovery_attempts):
+            rospy.loginfo("Recovery attempt %d/%d for plot %s", 
+                         attempt + 1, self.max_recovery_attempts, plot_name)
             for recovery_behavior in self.recovery_behaviors:
                 if recovery_behavior(goal):
                     if self.can_make_plan(goal):
@@ -334,16 +428,25 @@ class RecoveryNavigator:
     def run(self):
         route = rospy.get_param("~options", [0])
         rospy.loginfo("Executing route: %s", route)
+        rospy.loginfo("Max goal attempts: %d, Max home retry attempts: %d", 
+                     self.max_goal_attempts, self.max_home_retry_attempts)
+        rospy.loginfo("Ignore orientation: %s", self.ignore_orientation)
 
         success = 0
         for plot_idx in route:
             if not (0 <= plot_idx < len(self.plot_centers)):
+                rospy.logwarn("Invalid plot index: %d. Skipping.", plot_idx)
                 continue
+                
             goal_pose = self.plot_centers[plot_idx][0]
             goal = self.build_goal(*goal_pose)
-            if self.navigate_to_goal(str(plot_idx), goal):
+            
+            if self.navigate_to_goal_with_retry(str(plot_idx), goal):
                 success += 1
-                rospy.sleep(2.0)
+                rospy.loginfo("Successfully reached plot %d", plot_idx)
+                rospy.sleep(2.0)  # Wait at the plot
+            else:
+                rospy.logwarn("Failed to reach plot %d after all attempts", plot_idx)
 
         rospy.loginfo("Navigation complete: %d/%d plots reached", success, len(route))
 
@@ -356,4 +459,3 @@ if __name__ == '__main__':
     except Exception as e:
         rospy.logerr("Navigation failed with error: %s", str(e))
         raise
-
